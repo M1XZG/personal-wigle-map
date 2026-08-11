@@ -507,7 +507,7 @@ function resetFilters() {
   });
   elements.fromDate.value = "";
   elements.toDate.value = "";
-  elements.showRoutes.checked = true;
+  elements.showRoutes.checked = false;
   elements.densityMode.checked = false;
   scheduleMapRefresh(0);
 }

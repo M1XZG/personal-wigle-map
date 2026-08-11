@@ -181,7 +181,7 @@ select:focus-visible,
 
 .wigle-badge {
   display: block;
-  width: 6.25rem;
+  width: 8rem;
   margin-left: auto;
   flex: 0 0 auto;
   line-height: 0;
@@ -244,7 +244,7 @@ section {
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 0.8fr);
   gap: 0.55rem;
 }
 
@@ -271,8 +271,9 @@ section {
   font-size: 1.15rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
   overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .summary-date {
