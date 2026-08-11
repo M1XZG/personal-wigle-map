@@ -1,0 +1,54 @@
+services:
+  map:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: personal-wigle-map:local
+    restart: unless-stopped
+    environment:
+      DATA_DIR: /data
+      DATABASE_PATH: /data/wigle-map.sqlite
+      IMPORT_ROOT: /imports
+      WEB_DIR: /app/web
+      RESCAN_SECONDS: "${RESCAN_SECONDS:-0}"
+      MAX_UPLOAD_BYTES: "${MAX_UPLOAD_BYTES:-4294967296}"
+      APP_TITLE: "${APP_TITLE:-Personal WiGLE Map}"
+      APP_EYEBROW: "${APP_EYEBROW:-Wireless survey archive}"
+      WIGLE_BADGE_URL: "${WIGLE_BADGE_URL:-}"
+      WIGLE_PROFILE_URL: "${WIGLE_PROFILE_URL:-https://wigle.net}"
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8787}:8000"
+    volumes:
+      - type: bind
+        source: "${IMPORTS_HOST_PATH:-./imports}"
+        target: /imports
+      - type: bind
+        source: "${RUNTIME_HOST_PATH:-./runtime}"
+        target: /data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)); assert data['status']=='ok'"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 1024
+    cpus: "${CPUS:-4.0}"
+    mem_limit: "${MEM_LIMIT:-8g}"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+    stop_grace_period: 2m

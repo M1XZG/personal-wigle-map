@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#241238">
+  <title>Personal WiGLE Map</title>
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="preconnect" href="https://tile.openstreetmap.org">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#controls">Skip to controls</a>
+
+  <main class="app-shell">
+    <div id="map" aria-label="Map of observed wireless networks and survey routes"></div>
+
+    <button id="sidebar-toggle" class="sidebar-toggle" type="button"
+            aria-controls="sidebar" aria-expanded="true">
+      <span aria-hidden="true">☰</span>
+      <span class="toggle-label">Hide controls</span>
+    </button>
+
+    <aside id="sidebar" class="sidebar" aria-label="Map controls">
+      <header class="brand">
+        <div class="brand-mark" aria-hidden="true">⌁</div>
+        <div class="brand-copy">
+          <p id="brand-eyebrow" class="eyebrow">Wireless survey archive</p>
+          <h1 id="brand-title">Personal WiGLE Map</h1>
+        </div>
+        <a id="wigle-badge" class="wigle-badge" target="_blank"
+           rel="noopener noreferrer" aria-label="Open WiGLE" hidden>
+          <img id="wigle-badge-image" alt="WiGLE badge" width="200" height="50">
+        </a>
+      </header>
+
+      <div id="api-alert" class="alert alert-error" role="alert" hidden></div>
+
+      <div class="sidebar-scroll">
+        <section aria-labelledby="summary-title">
+          <div class="section-heading">
+            <h2 id="summary-title">At a glance</h2>
+            <span id="summary-status" class="status-dot" title="Loading summary">
+              <span class="sr-only">Loading summary</span>
+            </span>
+          </div>
+          <div class="summary-grid">
+            <article class="summary-card">
+              <span id="summary-networks" class="summary-value">—</span>
+              <span class="summary-label">Networks</span>
+            </article>
+            <article class="summary-card">
+              <span id="summary-observations" class="summary-value">—</span>
+              <span class="summary-label">Observations</span>
+            </article>
+            <article class="summary-card">
+              <span id="summary-routes" class="summary-value">—</span>
+              <span class="summary-label">Routes</span>
+            </article>
+            <article class="summary-card summary-card-wide">
+              <span id="summary-dates" class="summary-value summary-date">—</span>
+              <span class="summary-label">Date coverage</span>
+            </article>
+          </div>
+        </section>
+
+        <section id="controls" aria-labelledby="filters-title">
+          <div class="section-heading">
+            <h2 id="filters-title">Map filters</h2>
+            <button id="reset-filters" class="text-button" type="button">Reset</button>
+          </div>
+
+          <fieldset>
+            <legend>Network types</legend>
+            <div class="toggle-grid">
+              <label class="filter-toggle wifi">
+                <input type="checkbox" name="network-type" value="WIFI" checked>
+                <span class="toggle-icon" aria-hidden="true"></span>
+                <span>Wi-Fi</span>
+              </label>
+              <label class="filter-toggle bluetooth">
+                <input type="checkbox" name="network-type" value="BLUETOOTH,BLE" checked>
+                <span class="toggle-icon" aria-hidden="true"></span>
+                <span>Bluetooth / BLE</span>
+              </label>
+              <label class="filter-toggle cellular">
+                <input type="checkbox" name="network-type" value="GSM,LTE,CDMA,WCDMA,NR" checked>
+                <span class="toggle-icon" aria-hidden="true"></span>
+                <span>Cellular</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <div class="display-toggles">
+            <label class="switch-row">
+              <span>
+                <strong>Survey routes</strong>
+                <small>Show recorded paths</small>
+              </span>
+              <input id="show-routes" type="checkbox" role="switch" checked>
+            </label>
+            <label class="switch-row">
+              <span>
+                <strong>Density emphasis</strong>
+                <small>Scale points by observations</small>
+              </span>
+              <input id="density-mode" type="checkbox" role="switch">
+            </label>
+          </div>
+
+          <label class="field-label" for="device-filter">Devices</label>
+          <select id="device-filter" multiple aria-describedby="device-help"></select>
+          <small id="device-help" class="field-help">No selection includes every device. Ctrl/Cmd-click to choose several.</small>
+
+          <div class="date-grid">
+            <label>
+              <span class="field-label">From</span>
+              <input id="from-date" type="date">
+            </label>
+            <label>
+              <span class="field-label">To</span>
+              <input id="to-date" type="date">
+            </label>
+          </div>
+        </section>
+
+        <section aria-labelledby="route-legend-title">
+          <h2 id="route-legend-title">Route legend</h2>
+          <div id="route-legend" class="legend-list">
+            <p class="muted">Routes in view will appear here.</p>
+          </div>
+        </section>
+
+        <section aria-labelledby="import-title">
+          <div class="section-heading">
+            <h2 id="import-title">Import files</h2>
+            <button id="rescan-button" class="text-button" type="button">Rescan storage</button>
+          </div>
+          <form id="upload-form">
+            <label class="field-label" for="upload-device">Device slug</label>
+            <input id="upload-device" name="device" type="text" required
+                   autocomplete="off" placeholder="survey-phone"
+                   pattern="[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?">
+
+            <div id="drop-zone" class="drop-zone" tabindex="0" role="button"
+                 aria-controls="file-input" aria-describedby="file-help">
+              <span class="drop-icon" aria-hidden="true">⇧</span>
+              <strong>Drop survey files here</strong>
+              <span>or choose files</span>
+              <input id="file-input" name="files" type="file" multiple
+                     accept=".csv,.csv.gz,.gz,.kml,.gpx,.sqlite,.db">
+            </div>
+            <small id="file-help" class="field-help">CSV, CSV.GZ, KML, GPX, SQLite and DB files</small>
+            <ul id="file-list" class="file-list" aria-live="polite"></ul>
+
+            <button id="upload-button" class="primary-button" type="submit">Upload and import</button>
+            <div id="upload-progress-wrap" class="progress-wrap" hidden>
+              <progress id="upload-progress" max="100" value="0">0%</progress>
+              <span id="upload-progress-label">Uploading…</span>
+            </div>
+            <div id="upload-status" class="inline-status" role="status" aria-live="polite"></div>
+          </form>
+        </section>
+
+        <section aria-labelledby="imports-title">
+          <div class="section-heading">
+            <h2 id="imports-title">Recent imports</h2>
+            <button id="refresh-imports" class="icon-button" type="button" aria-label="Refresh recent imports">↻</button>
+          </div>
+          <div id="imports-list" class="imports-list" aria-live="polite">
+            <p class="muted">Loading imports…</p>
+          </div>
+        </section>
+
+        <footer>
+          Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>
+        </footer>
+      </div>
+    </aside>
+
+    <div id="map-state" class="map-state" role="status" aria-live="polite" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="map-state-text">Loading map data…</span>
+    </div>
+
+    <div class="map-key" aria-label="Network type colour key">
+      <span><i class="key-dot wifi-dot"></i>Wi-Fi</span>
+      <span><i class="key-dot bluetooth-dot"></i>Bluetooth</span>
+      <span><i class="key-dot cellular-dot"></i>Cellular</span>
+    </div>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="/app.js"></script>
+</body>
+</html>
