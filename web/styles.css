@@ -736,6 +736,8 @@ progress::-moz-progress-bar {
 }
 
 footer {
+  display: grid;
+  gap: 0.35rem;
   padding: 1rem 1.1rem calc(1rem + env(safe-area-inset-bottom));
   color: #9385a0;
   font-size: 0.65rem;

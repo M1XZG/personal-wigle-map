@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import sqlite3
 import time
 from pathlib import Path
@@ -304,6 +305,41 @@ def test_upload_gpx_and_rescan_csv(client: TestClient):
     assert client.post("/api/rescan").status_code == 202
     wait_for_job(client)
     assert client.get("/api/summary").json()["observations"]["total"] == before
+
+
+def test_upload_wigle_csv_gzip(client: TestClient):
+    csv_content = (
+        b"MAC,SSID,AuthMode,FirstSeen,Channel,Frequency,RSSI,"
+        b"CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,"
+        b"RCOIs,MfgrId,Type\n"
+        b"11:22:33:44:55:66,Test,[WPA2],2026-08-15 23:10:09,"
+        b"6,2437,-50,51.5,-1.7,10,3,,,WIFI\n"
+    )
+    compressed = gzip.compress(csv_content, mtime=0)
+    assert b"\x00" in compressed[:4096]
+
+    response = client.post(
+        "/api/upload",
+        data={"device": "test-phone"},
+        files={
+            "files": (
+                "WigleWifi_20260815231009.csv.gz",
+                compressed,
+                "application/gzip",
+            )
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["files"] == ["WigleWifi_20260815231009.csv.gz"]
+    wait_for_job(client)
+    imports = client.get("/api/imports").json()["imports"]
+    assert any(
+        item["source_name"] == "WigleWifi_20260815231009.csv.gz"
+        and item["format"] == "csv.gz"
+        and item["status"] == "complete"
+        for item in imports
+    )
 
 
 @pytest.mark.parametrize(

@@ -444,7 +444,9 @@ def create_app() -> FastAPI:
                                 chunk.startswith(EXECUTABLE_MAGIC)
                                 or (
                                     b"\x00" in chunk[:4096]
-                                    and not lower.endswith((".sqlite", ".db"))
+                                    and not lower.endswith(
+                                        (".sqlite", ".db", ".csv.gz")
+                                    )
                                 )
                                 or (
                                     lower.endswith((".sqlite", ".db"))
