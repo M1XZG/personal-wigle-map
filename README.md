@@ -106,8 +106,10 @@ form because real survey files must not be shared publicly.
 
 Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before
 starting, especially the privacy rules for examples and test fixtures.
-[SUPPORT.md](SUPPORT.md) explains where to ask for help, and security issues
-must be reported privately as described in [SECURITY.md](SECURITY.md).
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md) covers container, import, permissions
+and map-loading problems. [SUPPORT.md](SUPPORT.md) explains where to ask for
+help, and security issues must be reported privately as described in
+[SECURITY.md](SECURITY.md).
 
 ## Privacy and third-party services
 
