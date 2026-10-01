@@ -18,7 +18,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, statu
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import queries
+from . import queries, wigle_sync
 
 try:
     from . import ingestion
@@ -165,6 +165,27 @@ def _safe_runtime_status(value: Any) -> Any:
     return safe
 
 
+def _safe_sync_status(value: dict[str, Any]) -> dict[str, Any]:
+    safe = {
+        key: value[key]
+        for key in (
+            "enabled",
+            "running",
+            "last_started_at",
+            "last_finished_at",
+            "transactions",
+            "downloaded",
+            "existing",
+            "failed",
+        )
+        if key in value
+        and isinstance(value[key], (bool, int, float, str, type(None)))
+    }
+    if value.get("error"):
+        safe["error"] = "WiGLE sync failed"
+    return safe
+
+
 def create_app() -> FastAPI:
     data_dir = Path(os.getenv("DATA_DIR", "/data")).resolve()
     db_path = Path(os.getenv("DATABASE_PATH", data_dir / "wigle-map.sqlite")).resolve()
@@ -179,6 +200,21 @@ def create_app() -> FastAPI:
     wigle_profile_url = _optional_http_url_env(
         "WIGLE_PROFILE_URL", "https://wigle.net"
     )
+    wigle_api_name = os.getenv("WIGLE_API_NAME", "").strip()
+    wigle_api_token = os.getenv("WIGLE_API_TOKEN", "").strip()
+    wigle_sync_seconds = _positive_int_env(
+        "WIGLE_SYNC_SECONDS", 86400, allow_zero=True
+    )
+    if 0 < wigle_sync_seconds < 300:
+        raise RuntimeError("WIGLE_SYNC_SECONDS must be 0 or at least 300")
+    wigle_sync_on_start = _boolean_env("WIGLE_SYNC_ON_START", True)
+    if bool(wigle_api_name) != bool(wigle_api_token):
+        raise RuntimeError(
+            "WIGLE_API_NAME and WIGLE_API_TOKEN must both be set or both be empty"
+        )
+    wigle_sync_enabled = bool(
+        wigle_api_name and wigle_api_token and wigle_sync_seconds
+    )
     job_lock = threading.Lock()
     job_tasks: set[asyncio.Task[Any]] = set()
     job_state: dict[str, Any] = {
@@ -189,6 +225,17 @@ def create_app() -> FastAPI:
         "finished_at": None,
         "imported": 0,
         "skipped": 0,
+        "failed": 0,
+        "error": None,
+    }
+    sync_state: dict[str, Any] = {
+        "enabled": wigle_sync_enabled,
+        "running": False,
+        "last_started_at": None,
+        "last_finished_at": None,
+        "transactions": 0,
+        "downloaded": 0,
+        "existing": 0,
         "failed": 0,
         "error": None,
     }
@@ -286,6 +333,59 @@ def create_app() -> FastAPI:
             await asyncio.sleep(rescan_seconds)
             await run_import("periodic-rescan")
 
+    async def run_wigle_sync() -> None:
+        while job_state["running"] or job_state["queued"] or job_lock.locked():
+            await asyncio.sleep(1)
+        sync_state.update(
+            running=True,
+            last_started_at=datetime.now(timezone.utc).isoformat(),
+            last_finished_at=None,
+            transactions=0,
+            downloaded=0,
+            existing=0,
+            failed=0,
+            error=None,
+        )
+        logger.info("Starting automatic WiGLE account sync")
+        try:
+            result = await asyncio.to_thread(
+                wigle_sync.sync_once,
+                wigle_api_name,
+                wigle_api_token,
+                import_root,
+                data_dir / "wigle-sync",
+            )
+            sync_state.update(result)
+            logger.info(
+                "WiGLE sync finished: %s downloaded, %s existing, %s failed",
+                result["downloaded"],
+                result["existing"],
+                result["failed"],
+            )
+            if result["transactions"]:
+                while (
+                    job_state["running"]
+                    or job_state["queued"]
+                    or job_lock.locked()
+                ):
+                    await asyncio.sleep(1)
+                await run_import("wigle-sync")
+        except Exception as error:
+            sync_state["error"] = f"WiGLE sync failed ({type(error).__name__})"
+            logger.exception("Automatic WiGLE account sync failed")
+        finally:
+            sync_state.update(
+                running=False,
+                last_finished_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+    async def periodic_wigle_sync() -> None:
+        if not wigle_sync_on_start:
+            await asyncio.sleep(wigle_sync_seconds)
+        while True:
+            await run_wigle_sync()
+            await asyncio.sleep(wigle_sync_seconds)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -299,16 +399,24 @@ def create_app() -> FastAPI:
         periodic_task = (
             asyncio.create_task(periodic_rescan()) if rescan_seconds else None
         )
+        wigle_sync_task = (
+            asyncio.create_task(periodic_wigle_sync())
+            if wigle_sync_enabled
+            else None
+        )
         yield
-        if periodic_task:
-            periodic_task.cancel()
+        for task in (periodic_task, wigle_sync_task):
+            if not task:
+                continue
+            task.cancel()
             with suppress(asyncio.CancelledError):
-                await periodic_task
+                await task
 
     application = FastAPI(title=app_title, lifespan=lifespan)
     application.state.db_path = db_path
     application.state.import_root = import_root
     application.state.job_state = job_state
+    application.state.sync_state = sync_state
 
     def ensure_database() -> None:
         if not db_path.is_file():
@@ -327,6 +435,7 @@ def create_app() -> FastAPI:
             "status": "ok" if database_ok else "degraded",
             "database": database_ok,
             "import_job": _safe_runtime_status(job_state),
+            "wigle_sync": _safe_sync_status(sync_state),
         }
 
     @application.get("/api/config")
@@ -337,6 +446,11 @@ def create_app() -> FastAPI:
             "badge": {
                 "image_url": wigle_badge_url,
                 "link_url": wigle_profile_url,
+            },
+            "wigle_sync": {
+                "enabled": wigle_sync_enabled,
+                "interval_seconds": wigle_sync_seconds,
+                "on_start": wigle_sync_on_start,
             },
         }
 

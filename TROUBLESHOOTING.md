@@ -54,7 +54,7 @@ running.
 If `curl` cannot connect, confirm the effective Compose configuration:
 
 ```bash
-docker compose config
+docker compose config --quiet
 ```
 
 Check `BIND_ADDRESS` and `HOST_PORT` in `.env`. A default deployment is
@@ -145,7 +145,7 @@ docker compose logs --tail=50 map
 For custom mount locations, first inspect the resolved paths:
 
 ```bash
-docker compose config
+docker compose config --format json | python3 -c 'import json,sys; data=json.load(sys.stdin); print(*["{} -> {}".format(item.get("source"), item.get("target")) for item in data["services"]["map"]["volumes"]], sep="\n")'
 ```
 
 Apply `chown` only to the host paths shown for `/imports` and `/data`.
@@ -221,6 +221,40 @@ docker compose exec map sh -lc 'printf "WIGLE_BADGE_URL=%s\nWIGLE_PROFILE_URL=%s
 The browser retrieves the badge directly from WiGLE. An expired badge URL,
 network filter or browser privacy setting can block it. The badge is optional
 and does not affect imports or the map API.
+
+## Automatic WiGLE sync is not running
+
+Check whether the worker is enabled without printing credentials:
+
+```bash
+curl --silent http://127.0.0.1:8787/health | python3 -m json.tool
+```
+
+The `wigle_sync` object shows whether the worker is enabled or running, its
+last start and finish times, and download counts. It never returns credentials.
+
+Both credential variables must be set, and the interval must be greater than
+zero. Non-zero intervals shorter than five minutes are rejected:
+
+```bash
+docker compose exec map sh -lc 'test -n "$WIGLE_API_NAME" && test -n "$WIGLE_API_TOKEN" && test "$WIGLE_SYNC_SECONDS" -gt 0'
+```
+
+Review sync and import messages with:
+
+```bash
+docker compose logs --since=24h map
+```
+
+Common failures include invalid credentials, WiGLE rate limiting, temporary
+network errors, or a transaction whose KML is not yet available. Requests are
+retried with backoff. Existing non-empty KML files are not downloaded again.
+
+Changing `.env` requires recreating the container:
+
+```bash
+docker compose up -d
+```
 
 ## Rebuild after an update
 

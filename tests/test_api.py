@@ -137,6 +137,16 @@ def test_health_summary_and_static_ui(client: TestClient):
     health = client.get("/health")
     assert health.status_code == 200
     assert health.json()["status"] == "ok"
+    assert health.json()["wigle_sync"] == {
+        "enabled": False,
+        "running": False,
+        "last_started_at": None,
+        "last_finished_at": None,
+        "transactions": 0,
+        "downloaded": 0,
+        "existing": 0,
+        "failed": 0,
+    }
 
     summary = client.get("/api/summary")
     assert summary.status_code == 200
@@ -166,6 +176,11 @@ def test_public_config_defaults_to_no_badge(client: TestClient):
         "badge": {
             "image_url": "",
             "link_url": "https://wigle.net",
+        },
+        "wigle_sync": {
+            "enabled": False,
+            "interval_seconds": 86400,
+            "on_start": True,
         },
     }
 
@@ -200,6 +215,11 @@ def test_public_config_supports_custom_branding(
                 "image_url": "https://wigle.net/bi/example+badge.png",
                 "link_url": "https://wigle.net",
             },
+            "wigle_sync": {
+                "enabled": False,
+                "interval_seconds": 86400,
+                "on_start": True,
+            },
         }
 
 
@@ -211,6 +231,63 @@ def test_public_config_rejects_non_http_badge_url(
 
     with pytest.raises(RuntimeError, match="absolute HTTP or HTTPS URL"):
         main.create_app()
+
+
+def test_wigle_sync_requires_both_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("WIGLE_API_NAME", "name-only")
+    monkeypatch.delenv("WIGLE_API_TOKEN", raising=False)
+    import app.main as main
+
+    with pytest.raises(
+        RuntimeError,
+        match="WIGLE_API_NAME and WIGLE_API_TOKEN must both be set",
+    ):
+        main.create_app()
+
+
+def test_wigle_sync_rejects_interval_below_five_minutes(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("WIGLE_SYNC_SECONDS", "60")
+    import app.main as main
+
+    with pytest.raises(
+        RuntimeError,
+        match="WIGLE_SYNC_SECONDS must be 0 or at least 300",
+    ):
+        main.create_app()
+
+
+def test_wigle_sync_configuration_can_be_enabled_without_startup_run(
+    database: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("DATABASE_PATH", str(database))
+    monkeypatch.setenv("IMPORT_ROOT", str(tmp_path / "imports"))
+    monkeypatch.setenv(
+        "WEB_DIR", str(Path(__file__).resolve().parents[1] / "web")
+    )
+    monkeypatch.setenv("RESCAN_SECONDS", "0")
+    monkeypatch.setenv("WIGLE_API_NAME", "api-name")
+    monkeypatch.setenv("WIGLE_API_TOKEN", "api-token")
+    monkeypatch.setenv("WIGLE_SYNC_SECONDS", "3600")
+    monkeypatch.setenv("WIGLE_SYNC_ON_START", "false")
+
+    import app.importer as importer
+    import app.main as main
+
+    monkeypatch.setattr(main, "ingestion", importer)
+    with TestClient(main.create_app()) as configured_client:
+        wait_for_job(configured_client)
+        assert configured_client.get("/api/config").json()["wigle_sync"] == {
+            "enabled": True,
+            "interval_seconds": 3600,
+            "on_start": False,
+        }
 
 
 @pytest.mark.parametrize(

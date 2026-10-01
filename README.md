@@ -45,6 +45,10 @@ Docker Compose reads these values from `.env`:
 | `EXPOSE_NETWORK_IDENTIFIERS` | `false` | Return SSIDs and BSSIDs to the map UI on trusted deployments |
 | `WIGLE_BADGE_URL` | blank | Optional live WiGLE badge image URL |
 | `WIGLE_PROFILE_URL` | `https://wigle.net` | Link opened by the badge |
+| `WIGLE_API_NAME` | blank | WiGLE API name used for account-history sync |
+| `WIGLE_API_TOKEN` | blank | WiGLE API token used for account-history sync |
+| `WIGLE_SYNC_SECONDS` | `86400` | Account sync interval; `0` disables automatic sync |
+| `WIGLE_SYNC_ON_START` | `true` | Run an account sync after the container starts |
 | `RESCAN_SECONDS` | `0` | Periodic scan interval; `0` disables it |
 | `MAX_UPLOAD_BYTES` | `4294967296` | Per-file upload limit |
 | `CPUS` | `4.0` | Container CPU limit |
@@ -76,10 +80,40 @@ This exposes SSIDs and BSSIDs through `/api/networks` to anyone who can reach
 the application. Networks whose source data contains no SSID still appear as
 **Unnamed network**, but their BSSID is shown.
 
-## Importing account history
+## Automatic WiGLE account sync
 
-`download_kml.py` downloads the KML files available through your authenticated
-WiGLE account. Credentials are read only from the current shell:
+Create an API name and token in your
+[WiGLE account settings](https://wigle.net/account), then add them to the
+private `.env` file:
+
+```dotenv
+WIGLE_API_NAME=your-api-name
+WIGLE_API_TOKEN=your-api-token
+WIGLE_SYNC_SECONDS=86400
+WIGLE_SYNC_ON_START=true
+```
+
+Recreate the service:
+
+```bash
+docker compose up -d
+```
+
+When both credentials are set, the app checks WiGLE after startup and then at
+the configured interval. It lists account upload transactions, downloads only
+missing KML exports into `imports/kml/raw/`, writes sync manifests beneath
+`runtime/wigle-sync/`, and immediately imports newly downloaded files.
+Downloads use temporary files and atomic replacement so a failed request
+cannot leave a partial KML for the importer.
+
+Set `WIGLE_SYNC_SECONDS=0` or leave both credentials blank to disable automatic
+sync. Non-zero intervals must be at least 300 seconds. Credentials are passed
+to the container as environment variables and can be seen by users with Docker
+inspection access. Keep `.env` mode `600`, do not paste rendered Compose
+configuration into support requests, and limit Docker access to trusted
+administrators.
+
+The standalone downloader remains available for a manual one-off sync:
 
 ```bash
 export WIGLE_API_NAME='your-api-name'
@@ -87,9 +121,8 @@ export WIGLE_API_TOKEN='your-api-token'
 python3 download_kml.py
 ```
 
-The script writes private KML files under `imports/kml/raw/` and account
-manifests at the project root. All of those paths are excluded by `.gitignore`.
-Choose **Rescan storage** after the download finishes.
+The standalone script writes to the same import location and stores manifests
+at the project root. Choose **Rescan storage** after a manual download.
 
 ## Backups
 
