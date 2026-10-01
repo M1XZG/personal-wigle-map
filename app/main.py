@@ -43,6 +43,18 @@ EXECUTABLE_MAGIC = (
 logger = logging.getLogger(__name__)
 
 
+def _boolean_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise RuntimeError(f"{name} must be true or false")
+
+
 def _positive_int_env(name: str, default: int, allow_zero: bool = False) -> int:
     try:
         value = int(os.getenv(name, str(default)))
@@ -162,6 +174,7 @@ def create_app() -> FastAPI:
     rescan_seconds = _positive_int_env("RESCAN_SECONDS", 0, allow_zero=True)
     app_title = _text_env("APP_TITLE", "Personal WiGLE Map")
     app_eyebrow = _text_env("APP_EYEBROW", "Wireless survey archive")
+    expose_network_identifiers = _boolean_env("EXPOSE_NETWORK_IDENTIFIERS")
     wigle_badge_url = _optional_http_url_env("WIGLE_BADGE_URL")
     wigle_profile_url = _optional_http_url_env(
         "WIGLE_PROFILE_URL", "https://wigle.net"
@@ -359,6 +372,7 @@ def create_app() -> FastAPI:
                 _split_values(devices),
                 start,
                 end,
+                expose_network_identifiers,
             )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc

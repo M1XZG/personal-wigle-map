@@ -332,11 +332,15 @@ function popupHtml(properties) {
   const last = pick(properties, ["last_seen", "lastseen", "last", "latest"]);
   const observations = pick(properties, ["observations", "observation_count", "count", "samples"]);
   const signal = pick(properties, ["signal", "signal_dbm", "rssi", "best_signal"]);
+  const identifier = pick(properties, ["identifier", "bssid"]);
   const rows = [
     ["First seen", formatDate(first, true)],
     ["Last seen", formatDate(last, true)],
     ["Observations", formatNumber(observations)]
   ];
+  if (identifier) {
+    rows.push([code === "WIFI" ? "BSSID" : "Identifier", identifier]);
+  }
   if (signal !== null && signal !== undefined && signal !== "") {
     const signalText = /^-?\d+(\.\d+)?$/.test(String(signal)) ? `${signal} dBm` : String(signal);
     rows.push(["Signal", signalText]);
