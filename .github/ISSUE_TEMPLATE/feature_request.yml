@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest an improvement or new capability
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to do, and what currently gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the behaviour you would like to see.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Note any current workaround or other design you considered.
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and deployment impact
+      description: Could this expose survey data, require an external service, change network access, or increase storage/CPU use?
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and did not find this request.
+          required: true
+        - label: This request does not include private survey data or credentials.
+          required: true

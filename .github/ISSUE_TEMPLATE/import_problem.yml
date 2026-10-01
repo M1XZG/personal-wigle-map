@@ -1,0 +1,58 @@
+name: Import problem
+description: Report a supported file that cannot be imported correctly
+title: "[Import]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never upload a real WiGLE export or runtime database. These files can contain precise locations and wireless-network identifiers. Describe the structure with invented values or create a tiny synthetic sample.
+  - type: dropdown
+    id: format
+    attributes:
+      label: File format
+      options:
+        - WiGLE SQLite database
+        - CSV
+        - CSV.GZ
+        - KML
+        - GPX
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Export source and version
+      description: Name the app, device, or exporter that created the file.
+      placeholder: WiGLE Android app, version ...
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Import result
+      description: Explain what was skipped, misread, duplicated, or displayed incorrectly.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted log output
+      render: shell
+  - type: textarea
+    id: sample
+    attributes:
+      label: Synthetic example
+      description: If useful, provide a few fabricated rows or fields that reproduce the parser problem.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Privacy check
+      options:
+        - label: The report contains no real SSIDs, BSSIDs, credentials, coordinates, tracks, or account data.
+          required: true
+        - label: I tested a current release or `main`.
+          required: true

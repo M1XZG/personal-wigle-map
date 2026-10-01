@@ -1,0 +1,35 @@
+name: Setup or usage question
+description: Ask for help running or using Personal WiGLE Map
+title: "[Question]: "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the README first. For reproducible software defects, use the bug or import form instead.
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+    validations:
+      required: true
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you tried?
+      description: Include the relevant documentation or commands and the redacted result.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: Release, container tag, or commit SHA
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed credentials, network identifiers, and precise location data.
+          required: true
