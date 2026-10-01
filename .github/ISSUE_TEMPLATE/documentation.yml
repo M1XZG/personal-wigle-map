@@ -1,0 +1,31 @@
+name: Documentation improvement
+description: Report missing, incorrect, or unclear documentation
+title: "[Docs]: "
+labels:
+  - documentation
+body:
+  - type: input
+    id: location
+    attributes:
+      label: Documentation location
+      description: Link to the section or name the file.
+      placeholder: README.md — Importing account history
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: What is unclear or incorrect?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested wording or information
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed credentials and private WiGLE or location data.
+          required: true

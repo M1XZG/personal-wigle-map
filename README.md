@@ -97,6 +97,18 @@ python -m pytest -q
 The FastAPI app lives in `app/`; the dependency-free browser interface is in
 `web/`.
 
+## Community and support
+
+Found a problem or have an idea? Open an
+[issue](https://github.com/M1XZG/personal-wigle-map/issues/new/choose) and
+choose the form that matches your request. Import problems have a separate
+form because real survey files must not be shared publicly.
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before
+starting, especially the privacy rules for examples and test fixtures.
+[SUPPORT.md](SUPPORT.md) explains where to ask for help, and security issues
+must be reported privately as described in [SECURITY.md](SECURITY.md).
+
 ## Privacy and third-party services
 
 The browser loads Leaflet from unpkg, map tiles from OpenStreetMap, and your

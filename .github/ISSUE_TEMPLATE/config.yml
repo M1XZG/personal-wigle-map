@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/M1XZG/personal-wigle-map/security/advisories/new
+    about: Report vulnerabilities privately. Do not post sensitive survey data in an issue.
+  - name: Read the setup guide
+    url: "https://github.com/M1XZG/personal-wigle-map#quick-start"
+    about: Check the installation, configuration, import, and privacy guidance first.

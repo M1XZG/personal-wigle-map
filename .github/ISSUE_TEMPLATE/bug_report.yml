@@ -1,0 +1,82 @@
+name: Bug report
+description: Report a reproducible problem with the application
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Do not attach real WiGLE exports, database files, SSIDs, BSSIDs, API credentials, or precise survey locations. Replace sensitive values with safe examples.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Web map and interface
+        - Import or storage scan
+        - API
+        - Docker or deployment
+        - Backup or restore
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Provide a release, container tag, or commit SHA.
+      placeholder: main at abc1234
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment method
+      options:
+        - Docker Compose
+        - Local Python environment
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Give the smallest reliable sequence that triggers the problem.
+      placeholder: |
+        1. Start the application with...
+        2. Import a sanitised example...
+        3. Open...
+        4. See...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste a short, redacted excerpt. Use a code block and remove private data.
+      render: shell
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include operating system, browser, Docker/Python version, and anything else that may matter.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I removed credentials, network identifiers, and precise location data.
+          required: true
+        - label: I can reproduce this on the current release or `main`.
+          required: true
