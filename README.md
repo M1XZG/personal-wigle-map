@@ -5,9 +5,9 @@ exports. It imports WiGLE SQLite databases, CSV or CSV.GZ exports, KML files
 and timed GPX tracks, deduplicates overlapping observations, and displays
 network density and survey routes through a Leaflet interface.
 
-The API does not return SSIDs or network identifiers, but the source files and
-SQLite database still contain sensitive location data. Run this on a trusted
-LAN and do not publish port 8787 to the internet.
+The API hides SSIDs and network identifiers by default, but the source files
+and SQLite database still contain sensitive location data. Run this on a
+trusted LAN and do not publish port 8787 to the internet.
 
 ## Quick start
 
@@ -42,6 +42,7 @@ Docker Compose reads these values from `.env`:
 | `RUNTIME_HOST_PATH` | `./runtime` | SQLite runtime storage |
 | `APP_TITLE` | `Personal WiGLE Map` | Browser and sidebar title |
 | `APP_EYEBROW` | `Wireless survey archive` | Small heading above the title |
+| `EXPOSE_NETWORK_IDENTIFIERS` | `false` | Return SSIDs and BSSIDs to the map UI on trusted deployments |
 | `WIGLE_BADGE_URL` | blank | Optional live WiGLE badge image URL |
 | `WIGLE_PROFILE_URL` | `https://wigle.net` | Link opened by the badge |
 | `RESCAN_SECONDS` | `0` | Periodic scan interval; `0` disables it |
@@ -58,6 +59,22 @@ WIGLE_PROFILE_URL=https://wigle.net
 
 The browser loads that URL directly. The repository contains no badge image or
 user-specific WiGLE statistics.
+
+Network popups say **Unnamed network** while `EXPOSE_NETWORK_IDENTIFIERS` is
+false. To show imported SSIDs and BSSIDs, set this in `.env` and recreate the
+service:
+
+```dotenv
+EXPOSE_NETWORK_IDENTIFIERS=true
+```
+
+```bash
+docker compose up -d
+```
+
+This exposes SSIDs and BSSIDs through `/api/networks` to anyone who can reach
+the application. Networks whose source data contains no SSID still appear as
+**Unnamed network**, but their BSSID is shown.
 
 ## Importing account history
 

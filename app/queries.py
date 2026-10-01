@@ -227,11 +227,13 @@ def networks(
     devices: list[str],
     from_date: str | None,
     to_date: str | None,
+    include_identifiers: bool = False,
 ) -> dict[str, Any]:
     where, params = _network_filters(bounds, types, devices, from_date, to_date)
     if zoom >= 15:
         sql = (
-            "SELECT n.id, n.network_type, n.first_seen, n.last_seen, "
+            "SELECT n.id, n.network_type, n.name, n.identifier, "
+            "n.first_seen, n.last_seen, "
             "n.best_latitude, n.best_longitude, n.best_signal, n.observation_count "
             f"FROM networks n WHERE {where} "
             "ORDER BY n.last_seen DESC LIMIT ?"
@@ -239,24 +241,28 @@ def networks(
         with connect(db_path) as db:
             rows = db.execute(sql, [*params, NETWORK_POINT_LIMIT + 1]).fetchall()
         truncated = len(rows) > NETWORK_POINT_LIMIT
-        features = [
-            {
+        features = []
+        for row in rows[:NETWORK_POINT_LIMIT]:
+            properties = {
+                "id": row["id"],
+                "type": row["network_type"],
+                "first_seen": _iso_timestamp(row["first_seen"]),
+                "last_seen": _iso_timestamp(row["last_seen"]),
+                "best_signal": row["best_signal"],
+                "observation_count": row["observation_count"],
+            }
+            if include_identifiers:
+                if row["name"]:
+                    properties["name"] = row["name"]
+                properties["identifier"] = row["identifier"]
+            features.append({
                 "type": "Feature",
                 "geometry": {
                     "type": "Point",
                     "coordinates": [row["best_longitude"], row["best_latitude"]],
                 },
-                "properties": {
-                    "id": row["id"],
-                    "type": row["network_type"],
-                    "first_seen": _iso_timestamp(row["first_seen"]),
-                    "last_seen": _iso_timestamp(row["last_seen"]),
-                    "best_signal": row["best_signal"],
-                    "observation_count": row["observation_count"],
-                },
-            }
-            for row in rows[:NETWORK_POINT_LIMIT]
-        ]
+                "properties": properties,
+            })
         return {
             "type": "FeatureCollection",
             "mode": "points",

@@ -27,17 +27,17 @@ def database(tmp_path: Path) -> Path:
             ("/private/archive/phone-export.csv", "a" * 64, "2024-01-02T00:00:00Z"),
         )
         networks = [
-            (1, "WIFI", "AA:00:00:00:00:01", 1704067200, 1706745600, 51.5000, -0.1000, -40, 2, 1),
-            (2, "WIFI", "AA:00:00:00:00:02", 1735689600, 1738368000, 51.5003, -0.1003, -55, 1, 1),
-            (3, "BLUETOOTH", "AA:00:00:00:00:03", 1740787200, 1740787200, 40.7, -74.0, -70, 1, 1),
+            (1, "WIFI", "AA:00:00:00:00:01", 1704067200, 1706745600, 51.5000, -0.1000, -40, 2, 1, "Coffee Shop"),
+            (2, "WIFI", "AA:00:00:00:00:02", 1735689600, 1738368000, 51.5003, -0.1003, -55, 1, 1, "Library WiFi"),
+            (3, "BLUETOOTH", "AA:00:00:00:00:03", 1740787200, 1740787200, 40.7, -74.0, -70, 1, 1, "Headphones"),
         ]
         db.executemany(
             """
             INSERT INTO networks(
                 id, network_type, identifier, first_seen, last_seen,
                 best_latitude, best_longitude, best_signal,
-                observation_count, source_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                observation_count, source_count, name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             networks,
         )
@@ -246,12 +246,52 @@ def test_network_and_route_contracts(client: TestClient):
     assert len(body["features"]) == 1
     assert body["features"][0]["properties"]["type"] == "WIFI"
     assert "identifier" not in body["features"][0]["properties"]
+    assert "name" not in body["features"][0]["properties"]
 
     routes = client.get(
         "/api/routes?bbox=-1,50,1,52&devices=phone&to=2024-12-31"
     )
     assert routes.status_code == 200
     assert routes.json()["features"][0]["properties"]["device"] == "phone"
+
+
+def test_network_identifiers_can_be_enabled(
+    database: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("DATABASE_PATH", str(database))
+    monkeypatch.setenv("IMPORT_ROOT", str(tmp_path / "imports"))
+    monkeypatch.setenv(
+        "WEB_DIR", str(Path(__file__).resolve().parents[1] / "web")
+    )
+    monkeypatch.setenv("RESCAN_SECONDS", "0")
+    monkeypatch.setenv("EXPOSE_NETWORK_IDENTIFIERS", "true")
+
+    import app.importer as importer
+    import app.main as main
+
+    monkeypatch.setattr(main, "ingestion", importer)
+    with TestClient(main.create_app()) as configured_client:
+        wait_for_job(configured_client)
+        response = configured_client.get(
+            "/api/networks?bbox=-1,50,1,52&zoom=16&devices=tablet"
+        )
+        properties = response.json()["features"][0]["properties"]
+        assert properties["name"] == "Library WiFi"
+        assert properties["identifier"] == "AA:00:00:00:00:02"
+
+
+def test_network_identifier_setting_rejects_invalid_value(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("EXPOSE_NETWORK_IDENTIFIERS", "sometimes")
+    import app.main as main
+
+    with pytest.raises(
+        RuntimeError,
+        match="EXPOSE_NETWORK_IDENTIFIERS must be true or false",
+    ):
+        main.create_app()
 
 
 def test_import_paths_are_redacted(client: TestClient):

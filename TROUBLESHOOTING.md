@@ -171,6 +171,35 @@ The default per-file upload limit is 4 GiB. Check the configured value with:
 docker compose exec map printenv MAX_UPLOAD_BYTES
 ```
 
+## Every popup says Unnamed network
+
+This is the default privacy behaviour. SSIDs and BSSIDs are stored in the local
+database but omitted from `/api/networks`, so the browser has no name to
+display.
+
+On a trusted private deployment, opt in by adding this to `.env`:
+
+```dotenv
+EXPOSE_NETWORK_IDENTIFIERS=true
+```
+
+Recreate the service so it receives the changed environment:
+
+```bash
+docker compose up -d
+```
+
+Confirm the setting inside the container:
+
+```bash
+docker compose exec map printenv EXPOSE_NETWORK_IDENTIFIERS
+```
+
+Anyone who can reach the application can read the returned SSIDs and BSSIDs.
+Keep the setting disabled if the service is shared with people who should not
+see imported network identifiers. A hidden or empty SSID still appears as
+**Unnamed network**, but its BSSID is shown when the setting is enabled.
+
 ## The map page loads without tiles or styling
 
 The browser loads Leaflet from unpkg and map tiles from OpenStreetMap. Check

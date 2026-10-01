@@ -14,6 +14,7 @@ services:
       MAX_UPLOAD_BYTES: "${MAX_UPLOAD_BYTES:-4294967296}"
       APP_TITLE: "${APP_TITLE:-Personal WiGLE Map}"
       APP_EYEBROW: "${APP_EYEBROW:-Wireless survey archive}"
+      EXPOSE_NETWORK_IDENTIFIERS: "${EXPOSE_NETWORK_IDENTIFIERS:-false}"
       WIGLE_BADGE_URL: "${WIGLE_BADGE_URL:-}"
       WIGLE_PROFILE_URL: "${WIGLE_PROFILE_URL:-https://wigle.net}"
     ports:
