@@ -348,6 +348,7 @@ function popupHtml(properties) {
   const frequencyValue = pick(properties, ["frequency"]);
   const frequency = frequencyValue === null || frequencyValue === "" ? NaN : Number(frequencyValue);
   const encryption = pick(properties, ["encryption", "capabilities"]);
+  const attributes = pick(properties, ["attributes"]);
   const accuracyValue = pick(properties, ["accuracy", "accuracy_meters"]);
   const accuracy = accuracyValue === null || accuracyValue === "" ? NaN : Number(accuracyValue);
   const identifier = pick(properties, ["identifier", "bssid"]);
@@ -385,6 +386,8 @@ function popupHtml(properties) {
       ? "5 GHz"
       : frequency >= 5925 && frequency <= 7125
         ? "6 GHz"
+        : frequency >= 58320 && frequency <= 69120
+          ? "60 GHz"
         : "";
   if (channel !== null && channel !== undefined && channel !== "") {
     rows.push(["Channel", band ? `${channel} · ${band}` : channel]);
@@ -394,6 +397,9 @@ function popupHtml(properties) {
   }
   if (encryption) {
     rows.push(["Encryption", encryption]);
+  }
+  if (attributes) {
+    rows.push(["Attributes", attributes]);
   }
   if (Number.isFinite(accuracy)) {
     rows.push(["Location accuracy", `${accuracy} m`]);

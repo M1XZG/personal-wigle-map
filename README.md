@@ -85,6 +85,13 @@ device attached to the earliest observation, the device whose observation
 supplies the displayed map position when different, and any additional devices
 that observed the same network.
 
+Radio metadata is interpreted by network type. Wi-Fi popups show valid Wi-Fi
+frequencies and derive a missing channel when the frequency maps to a standard
+2.4, 5, 6, or 60 GHz channel. Bluetooth's overloaded WiGLE device-class value
+is shown as an attribute rather than being mislabeled as MHz or encryption.
+Networks imported from sources that contain neither frequency nor channel
+leave those fields absent.
+
 ## Automatic WiGLE account sync
 
 Create an API name and token in your
