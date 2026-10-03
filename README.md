@@ -42,6 +42,7 @@ Docker Compose reads these values from `.env`:
 | `RUNTIME_HOST_PATH` | `./runtime` | SQLite runtime storage |
 | `APP_TITLE` | `Personal WiGLE Map` | Browser and sidebar title |
 | `APP_EYEBROW` | `Wireless survey archive` | Small heading above the title |
+| `APP_VERSION` | `development` | Build or commit identifier displayed in the sidebar footer |
 | `EXPOSE_NETWORK_IDENTIFIERS` | `false` | Return SSIDs and BSSIDs to the map UI on trusted deployments |
 | `WIGLE_BADGE_URL` | blank | Optional live WiGLE badge image URL |
 | `WIGLE_PROFILE_URL` | `https://wigle.net` | Link opened by the badge |
@@ -165,6 +166,17 @@ python -m pytest -q
 
 The FastAPI app lives in `app/`; the dependency-free browser interface is in
 `web/`.
+
+The map can overzoom to level 22 for separating tightly grouped observations.
+OpenStreetMap's level-19 native tiles are scaled at the additional zoom levels,
+so no unsupported tile URLs are requested.
+
+For a deployment footer that identifies the exact source commit, pass the
+short commit SHA while rebuilding:
+
+```bash
+APP_VERSION="$(git rev-parse --short=12 HEAD)" docker compose up -d --build
+```
 
 ## Community and support
 

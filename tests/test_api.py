@@ -152,6 +152,7 @@ def client(database: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "WEB_DIR", str(Path(__file__).resolve().parents[1] / "web")
     )
     monkeypatch.setenv("RESCAN_SECONDS", "0")
+    monkeypatch.delenv("APP_VERSION", raising=False)
     import app.importer as importer
     import app.main as main
 
@@ -189,9 +190,13 @@ def test_health_summary_and_static_ui(client: TestClient):
     assert body["coverage"]["first"].startswith("2024-01-01")
 
     assert "Personal WiGLE Map" in client.get("/").text
-    assert client.get("/app.js").headers["content-type"].startswith(
+    assert 'id="app-version"' in client.get("/").text
+    app_js = client.get("/app.js")
+    assert app_js.headers["content-type"].startswith(
         "text/javascript"
     )
+    assert "maxNativeZoom: 19" in app_js.text
+    assert "maxZoom: 22" in app_js.text
     assert client.get("/styles.css").status_code == 200
 
 
@@ -201,6 +206,7 @@ def test_public_config_defaults_to_no_badge(client: TestClient):
     assert response.json() == {
         "title": "Personal WiGLE Map",
         "eyebrow": "Wireless survey archive",
+        "version": "development",
         "badge": {
             "image_url": "",
             "link_url": "https://wigle.net",
@@ -225,6 +231,7 @@ def test_public_config_supports_custom_branding(
     monkeypatch.setenv("RESCAN_SECONDS", "0")
     monkeypatch.setenv("APP_TITLE", "My Survey Map")
     monkeypatch.setenv("APP_EYEBROW", "Field archive")
+    monkeypatch.setenv("APP_VERSION", "abc1234")
     monkeypatch.setenv(
         "WIGLE_BADGE_URL", "https://wigle.net/bi/example+badge.png"
     )
@@ -239,6 +246,7 @@ def test_public_config_supports_custom_branding(
         assert configured_client.get("/api/config").json() == {
             "title": "My Survey Map",
             "eyebrow": "Field archive",
+            "version": "abc1234",
             "badge": {
                 "image_url": "https://wigle.net/bi/example+badge.png",
                 "link_url": "https://wigle.net",

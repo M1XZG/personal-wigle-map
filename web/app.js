@@ -33,6 +33,7 @@ const elements = {
   toggleLabel: document.querySelector(".toggle-label"),
   brandTitle: document.querySelector("#brand-title"),
   brandEyebrow: document.querySelector("#brand-eyebrow"),
+  appVersion: document.querySelector("#app-version"),
   wigleBadge: document.querySelector("#wigle-badge"),
   wigleBadgeImage: document.querySelector("#wigle-badge-image"),
   apiAlert: document.querySelector("#api-alert"),
@@ -69,11 +70,13 @@ const map = L.map("map", {
   zoomControl: true,
   preferCanvas: true,
   worldCopyJump: true,
-  minZoom: 2
+  minZoom: 2,
+  maxZoom: 22
 }).setView([25, 0], 3);
 
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 19,
+  maxNativeZoom: 19,
+  maxZoom: 22,
   attribution: "&copy; OpenStreetMap contributors"
 }).addTo(map);
 
@@ -158,12 +161,14 @@ async function loadConfig() {
   const config = await fetchJson("/api/config");
   const title = String(config?.title || "Personal WiGLE Map");
   const eyebrow = String(config?.eyebrow || "Wireless survey archive");
+  const version = String(config?.version || "development");
   const imageUrl = String(config?.badge?.image_url || "");
   const linkUrl = String(config?.badge?.link_url || "https://wigle.net");
 
   document.title = title;
   elements.brandTitle.textContent = title;
   elements.brandEyebrow.textContent = eyebrow;
+  elements.appVersion.textContent = `Build: ${version}`;
 
   if (imageUrl) {
     elements.wigleBadge.href = linkUrl;
