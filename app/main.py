@@ -195,6 +195,7 @@ def create_app() -> FastAPI:
     rescan_seconds = _positive_int_env("RESCAN_SECONDS", 0, allow_zero=True)
     app_title = _text_env("APP_TITLE", "Personal WiGLE Map")
     app_eyebrow = _text_env("APP_EYEBROW", "Wireless survey archive")
+    app_version = _text_env("APP_VERSION", "development", 64)
     expose_network_identifiers = _boolean_env("EXPOSE_NETWORK_IDENTIFIERS")
     wigle_badge_url = _optional_http_url_env("WIGLE_BADGE_URL")
     wigle_profile_url = _optional_http_url_env(
@@ -443,6 +444,7 @@ def create_app() -> FastAPI:
         return {
             "title": app_title,
             "eyebrow": app_eyebrow,
+            "version": app_version,
             "badge": {
                 "image_url": wigle_badge_url,
                 "link_url": wigle_profile_url,

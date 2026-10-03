@@ -21,6 +21,10 @@ COPY app /app/app
 COPY web /app/web
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
+ARG APP_VERSION=development
+ENV APP_VERSION=$APP_VERSION
+LABEL org.opencontainers.image.revision=$APP_VERSION
+
 RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh \
     && mkdir -p /data /imports \
     && chown -R app:app /data /imports

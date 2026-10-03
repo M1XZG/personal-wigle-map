@@ -748,6 +748,10 @@ footer a {
   color: #c9b8d5;
 }
 
+.app-version {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .sidebar-toggle {
   position: absolute;
   z-index: 700;

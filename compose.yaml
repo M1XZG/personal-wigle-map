@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        APP_VERSION: "${APP_VERSION:-development}"
     image: personal-wigle-map:local
     restart: unless-stopped
     environment:
