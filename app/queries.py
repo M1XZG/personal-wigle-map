@@ -105,6 +105,70 @@ def _network_filters(
     return " AND ".join(clauses), params
 
 
+def _chunks(values: list[int], size: int = 500) -> Iterable[list[int]]:
+    for offset in range(0, len(values), size):
+        yield values[offset : offset + size]
+
+
+def _network_device_provenance(
+    db: sqlite3.Connection,
+    rows: list[sqlite3.Row],
+) -> dict[int, dict[str, list[str]]]:
+    provenance: dict[int, dict[str, set[str]]] = {
+        row["id"]: {
+            "devices": set(),
+            "first_seen_devices": set(),
+            "position_devices": set(),
+        }
+        for row in rows
+    }
+    network_ids = list(provenance)
+    for batch in _chunks(network_ids):
+        placeholders = ",".join("?" for _ in batch)
+        for row in db.execute(
+            "SELECT ns.network_id, i.device_label "
+            "FROM network_sources ns JOIN imports i ON i.id = ns.import_id "
+            f"WHERE ns.network_id IN ({placeholders})",
+            batch,
+        ):
+            provenance[row["network_id"]]["devices"].add(row["device_label"])
+        for row in db.execute(
+            "SELECT DISTINCT o.network_id, os.source_device "
+            "FROM observations o "
+            "JOIN networks n ON n.id = o.network_id "
+            "JOIN observation_sources os ON os.observation_id = o.id "
+            f"WHERE o.network_id IN ({placeholders}) "
+            "AND o.observed_at = n.first_seen",
+            batch,
+        ):
+            provenance[row["network_id"]]["first_seen_devices"].add(
+                row["source_device"]
+            )
+
+    observation_to_network = {
+        row["best_observation_id"]: row["id"]
+        for row in rows
+        if row["best_observation_id"] is not None
+    }
+    for batch in _chunks(list(observation_to_network)):
+        placeholders = ",".join("?" for _ in batch)
+        for row in db.execute(
+            "SELECT observation_id, source_device FROM observation_sources "
+            f"WHERE observation_id IN ({placeholders})",
+            batch,
+        ):
+            network_id = observation_to_network[row["observation_id"]]
+            provenance[network_id]["position_devices"].add(row["source_device"])
+
+    return {
+        network_id: {
+            key: sorted(values)
+            for key, values in fields.items()
+        }
+        for network_id, fields in provenance.items()
+    }
+
+
 def summary(db_path: Path | str, import_status: Any = None) -> dict[str, Any]:
     with connect(db_path) as db:
         network_total = db.execute("SELECT COUNT(*) FROM networks").fetchone()[0]
@@ -236,7 +300,7 @@ def networks(
             "n.first_seen, n.last_seen, "
             "n.best_latitude, n.best_longitude, n.best_signal, n.observation_count, "
             "n.encryption, n.capabilities, n.frequency, n.channel, "
-            "best.accuracy AS best_accuracy "
+            "best.id AS best_observation_id, best.accuracy AS best_accuracy "
             "FROM networks n "
             "LEFT JOIN observations best ON best.id = ("
             "SELECT o.id FROM observations o WHERE o.network_id = n.id "
@@ -249,9 +313,11 @@ def networks(
         )
         with connect(db_path) as db:
             rows = db.execute(sql, [*params, NETWORK_POINT_LIMIT + 1]).fetchall()
+            returned_rows = rows[:NETWORK_POINT_LIMIT]
+            provenance = _network_device_provenance(db, returned_rows)
         truncated = len(rows) > NETWORK_POINT_LIMIT
         features = []
-        for row in rows[:NETWORK_POINT_LIMIT]:
+        for row in returned_rows:
             properties = {
                 "id": row["id"],
                 "type": row["network_type"],
@@ -263,6 +329,7 @@ def networks(
                 "frequency": row["frequency"],
                 "channel": row["channel"] or None,
                 "accuracy": row["best_accuracy"],
+                **provenance[row["id"]],
             }
             if include_identifiers:
                 if row["name"]:

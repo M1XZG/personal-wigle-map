@@ -26,10 +26,20 @@ def database(tmp_path: Path) -> Path:
             """,
             ("/private/archive/phone-export.csv", "a" * 64, "2024-01-02T00:00:00Z"),
         )
+        db.execute(
+            """
+            INSERT INTO imports(
+                id, source_path, sha256, device_label, size_bytes, mtime_ns,
+                format, status, network_count, observation_count,
+                route_point_count, imported_at
+            ) VALUES (2, ?, ?, 'tablet', 100, 1, 'csv', 'complete', 2, 2, 2, ?)
+            """,
+            ("/private/archive/tablet-export.csv", "b" * 64, "2025-02-02T00:00:00Z"),
+        )
         networks = [
-            (1, "WIFI", "AA:00:00:00:00:01", 1704067200, 1706745600, 51.5000, -0.1000, -40, 2, 1, "Coffee Shop", "[WPA2][ESS]", 2437, "6"),
-            (2, "WIFI", "AA:00:00:00:00:02", 1735689600, 1738368000, 51.5003, -0.1003, -55, 1, 1, "Library WiFi", "[WPA3][ESS]", 5975, "5"),
-            (3, "BLUETOOTH", "AA:00:00:00:00:03", 1740787200, 1740787200, 40.7, -74.0, -70, 1, 1, "Headphones", "", None, ""),
+            (1, "WIFI", "AA:00:00:00:00:01", 1704110400, 1706788800, 51.5000, -0.1000, -40, 2, 2, "Coffee Shop", "[WPA2][ESS]", 2437, "6"),
+            (2, "WIFI", "AA:00:00:00:00:02", 1738411200, 1738411200, 51.5003, -0.1003, -55, 1, 1, "Library WiFi", "[WPA3][ESS]", 5975, "5"),
+            (3, "BLUETOOTH", "AA:00:00:00:00:03", 1740820800, 1740820800, 40.7, -74.0, -70, 1, 1, "Headphones", "", None, ""),
         ]
         db.executemany(
             """
@@ -42,12 +52,22 @@ def database(tmp_path: Path) -> Path:
             networks,
         )
         observations = [
-            (1, 1, 1704110400, 51.5, -0.1, "phone"),
-            (2, 1, 1706788800, 51.5, -0.1, "phone"),
-            (3, 2, 1738411200, 51.5003, -0.1003, "tablet"),
-            (4, 3, 1740820800, 40.7, -74.0, "phone"),
+            (1, 1, 1704110400, 51.5, -0.1, -70, 8.0, "phone", 1),
+            (2, 1, 1706788800, 51.5, -0.1, -40, 3.0, "tablet", 2),
+            (3, 2, 1738411200, 51.5003, -0.1003, -55, 2.5, "tablet", 2),
+            (4, 3, 1740820800, 40.7, -74.0, -70, 8.0, "phone", 1),
         ]
-        for observation_id, network_id, observed_at, lat, lon, device in observations:
+        for (
+            observation_id,
+            network_id,
+            observed_at,
+            lat,
+            lon,
+            signal,
+            accuracy,
+            device,
+            import_id,
+        ) in observations:
             network = networks[network_id - 1]
             fingerprint = observation_fingerprint(
                 network[1], network[2], observed_at, lat, lon
@@ -56,8 +76,8 @@ def database(tmp_path: Path) -> Path:
                 """
                 INSERT INTO observations(
                     id, observation_hash, network_id, observed_at, latitude,
-                    longitude, accuracy, source_device, source_file, import_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    longitude, signal, accuracy, source_device, source_file, import_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     observation_id,
@@ -66,19 +86,25 @@ def database(tmp_path: Path) -> Path:
                     observed_at,
                     lat,
                     lon,
-                    2.5 if network_id == 2 else 8.0,
+                    signal,
+                    accuracy,
                     device,
                     f"/private/{device}.csv",
+                    import_id,
                 ),
             )
             db.execute(
                 """
                 INSERT INTO observation_sources(
                     observation_id, import_id, source_device, source_file
-                ) VALUES (?, 1, ?, ?)
+                ) VALUES (?, ?, ?, ?)
                 """,
-                (observation_id, device, f"/private/{device}.csv"),
+                (observation_id, import_id, device, f"/private/{device}.csv"),
             )
+        db.executemany(
+            "INSERT INTO network_sources(network_id, import_id) VALUES (?, ?)",
+            [(1, 1), (1, 2), (2, 2), (3, 1)],
+        )
         db.executemany(
             """
             INSERT INTO route_segments(
@@ -153,7 +179,7 @@ def test_health_summary_and_static_ui(client: TestClient):
     assert summary.status_code == 200
     body = summary.json()
     assert body["networks"]["by_type"] == {"WIFI": 2, "BLUETOOTH": 1}
-    assert body["observations"]["by_device"]["phone"] == 3
+    assert body["observations"]["by_device"] == {"phone": 2, "tablet": 2}
     assert body["routes"] == {
         "segments": 2,
         "points": 4,
@@ -327,6 +353,9 @@ def test_network_and_route_contracts(client: TestClient):
     assert body["features"][0]["properties"]["frequency"] == 5975
     assert body["features"][0]["properties"]["encryption"] == "[WPA3][ESS]"
     assert body["features"][0]["properties"]["accuracy"] == 2.5
+    assert body["features"][0]["properties"]["devices"] == ["tablet"]
+    assert body["features"][0]["properties"]["first_seen_devices"] == ["tablet"]
+    assert body["features"][0]["properties"]["position_devices"] == ["tablet"]
     assert "identifier" not in body["features"][0]["properties"]
     assert "name" not in body["features"][0]["properties"]
 
@@ -335,6 +364,15 @@ def test_network_and_route_contracts(client: TestClient):
     )
     assert routes.status_code == 200
     assert routes.json()["features"][0]["properties"]["device"] == "phone"
+
+    multi_device = client.get(
+        "/api/networks?bbox=-1,50,1,52&zoom=16"
+        "&devices=phone&from=2024-01-01&to=2024-12-31"
+    )
+    properties = multi_device.json()["features"][0]["properties"]
+    assert properties["devices"] == ["phone", "tablet"]
+    assert properties["first_seen_devices"] == ["phone"]
+    assert properties["position_devices"] == ["tablet"]
 
 
 def test_network_identifiers_can_be_enabled(
@@ -378,8 +416,10 @@ def test_network_identifier_setting_rejects_invalid_value(
 
 def test_import_paths_are_redacted(client: TestClient):
     body = client.get("/api/imports").json()
-    assert body["imports"][0]["source_name"] == "phone-export.csv"
-    assert "source_path" not in body["imports"][0]
+    assert {
+        item["source_name"] for item in body["imports"]
+    } >= {"phone-export.csv", "tablet-export.csv"}
+    assert all("source_path" not in item for item in body["imports"])
 
 
 def test_upload_gpx_and_rescan_csv(client: TestClient):

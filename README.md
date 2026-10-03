@@ -80,6 +80,11 @@ This exposes SSIDs and BSSIDs through `/api/networks` to anyone who can reach
 the application. Networks whose source data contains no SSID still appear as
 **Unnamed network**, but their BSSID is shown.
 
+At high zoom, network popups also show device provenance. They identify the
+device attached to the earliest observation, the device whose observation
+supplies the displayed map position when different, and any additional devices
+that observed the same network.
+
 ## Automatic WiGLE account sync
 
 Create an API name and token in your
