@@ -803,7 +803,8 @@ footer a {
   backdrop-filter: blur(18px);
 }
 
-.stack-drawer[hidden] {
+.stack-drawer[hidden],
+.stack-drawer [hidden] {
   display: none;
 }
 
