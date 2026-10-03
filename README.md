@@ -6,10 +6,14 @@ and timed GPX tracks, deduplicates overlapping observations, and displays
 network density and survey routes through a Leaflet interface.
 
 At high zoom, networks sharing an exact map position are represented by a
-counted stack marker. Selecting it opens a paginated network list; stacks of up
-to eight networks also fan out around the true position. Selecting a network
-highlights each distinct location where it was observed without drawing a
-misleading route between those locations.
+counted stack marker. Nearby markers that overlap on screen are combined into
+a badge showing the total networks and number of locations. Zooming in splits
+them again when there is room. The drawer lists networks across those locations,
+25 at a time, and its location selector lets you inspect one location without
+zooming. Grouping does not change stored coordinates or merge survey tracks.
+Small groups of up to eight networks fan out with lines to their true positions.
+Selecting a network highlights each distinct location where it was observed
+without drawing a misleading route between those locations.
 
 The API hides SSIDs and network identifiers by default, but the source files
 and SQLite database still contain sensitive location data. Run this on a
@@ -168,6 +172,7 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
+node --test tests/*.test.cjs
 ```
 
 The FastAPI app lives in `app/`; the dependency-free browser interface is in

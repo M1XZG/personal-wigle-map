@@ -696,7 +696,7 @@ def create_app() -> FastAPI:
             if not index.is_file():
                 raise HTTPException(404, "index.html is unavailable")
             content = index.read_text(encoding="utf-8")
-            for filename in ("styles.css", "app.js"):
+            for filename in ("styles.css", "marker-groups.js", "app.js"):
                 asset = web_dir / filename
                 if not asset.is_file():
                     raise HTTPException(503, "Web assets are unavailable")
@@ -711,6 +711,9 @@ def create_app() -> FastAPI:
         )
         @application.api_route(
             "/app.js", methods=["GET", "HEAD"], include_in_schema=False
+        )
+        @application.api_route(
+            "/marker-groups.js", methods=["GET", "HEAD"], include_in_schema=False
         )
         def web_asset(request: Request) -> FileResponse:
             asset = web_dir / request.url.path.rsplit("/", 1)[-1]
