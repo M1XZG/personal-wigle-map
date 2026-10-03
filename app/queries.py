@@ -18,6 +18,24 @@ NETWORK_POINT_LIMIT = 5_000
 NETWORK_CLUSTER_LIMIT = 2_000
 ROUTE_LIMIT = 2_000
 ROUTE_POINT_LIMIT = 200_000
+WIFI_5_GHZ_CHANNELS = frozenset(
+    (
+        7, 8, 9, 11, 12, 16, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50,
+        52, 54, 56, 58, 60, 62, 64, 68, 96, 100, 102, 104, 106, 108,
+        110, 112, 114, 116, 118, 120, 122, 124, 126, 128, 132, 134,
+        136, 138, 140, 142, 144, 149, 151, 153, 155, 157, 159, 161,
+        163, 165, 167, 169, 171, 173, 175, 177, 182, 183, 184,
+        187, 188, 189, 192, 196,
+    )
+)
+WIFI_60_GHZ_FREQUENCIES = {
+    58_320: 1,
+    60_480: 2,
+    62_640: 3,
+    64_800: 4,
+    66_960: 5,
+    69_120: 6,
+}
 
 
 @dataclass(frozen=True)
@@ -166,6 +184,51 @@ def _network_device_provenance(
             for key, values in fields.items()
         }
         for network_id, fields in provenance.items()
+    }
+
+
+def wifi_channel_from_frequency(frequency: int | None) -> str | None:
+    if frequency is None:
+        return None
+    if frequency == 2484:
+        return "14"
+    if 2412 <= frequency <= 2472 and (frequency - 2412) % 5 == 0:
+        return str((frequency - 2407) // 5)
+    if 4910 <= frequency <= 4980 and (frequency - 4000) % 5 == 0:
+        channel = (frequency - 4000) // 5
+        return str(channel) if channel in WIFI_5_GHZ_CHANNELS else None
+    if 5000 <= frequency < 5925 and (frequency - 5000) % 5 == 0:
+        channel = (frequency - 5000) // 5
+        return str(channel) if channel in WIFI_5_GHZ_CHANNELS else None
+    if frequency == 5935:
+        return "2"
+    if 5955 <= frequency <= 7115 and (frequency - 5955) % 20 == 0:
+        return str((frequency - 5950) // 5)
+    channel = WIFI_60_GHZ_FREQUENCIES.get(frequency)
+    return str(channel) if channel is not None else None
+
+
+def _network_radio_properties(row: sqlite3.Row) -> dict[str, Any]:
+    capabilities = row["capabilities"] or row["encryption"] or None
+    if row["network_type"] != "WIFI":
+        return {
+            "encryption": None,
+            "attributes": capabilities,
+            "frequency": None,
+            "channel": None,
+        }
+
+    frequency = row["frequency"]
+    derived_channel = wifi_channel_from_frequency(frequency)
+    stored_channel = str(row["channel"] or "").strip()
+    if stored_channel == "0":
+        stored_channel = ""
+    valid_frequency = frequency if derived_channel is not None else None
+    return {
+        "encryption": row["encryption"] or row["capabilities"] or None,
+        "attributes": None,
+        "frequency": valid_frequency,
+        "channel": stored_channel or derived_channel,
     }
 
 
@@ -325,10 +388,8 @@ def networks(
                 "last_seen": _iso_timestamp(row["last_seen"]),
                 "best_signal": row["best_signal"],
                 "observation_count": row["observation_count"],
-                "encryption": row["encryption"] or row["capabilities"] or None,
-                "frequency": row["frequency"],
-                "channel": row["channel"] or None,
                 "accuracy": row["best_accuracy"],
+                **_network_radio_properties(row),
                 **provenance[row["id"]],
             }
             if include_identifiers:

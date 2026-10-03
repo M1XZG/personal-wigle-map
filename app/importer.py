@@ -242,12 +242,14 @@ def _parse_csv(path: Path) -> Iterator[tuple[ObservationRecord, RouteRecord | No
             longitude = _float(row.get("CurrentLongitude"))
             if not _valid_coordinates(latitude, longitude):
                 continue
+            network_type = _normalize_type(row.get("Type"))
+            capabilities = (row.get("AuthMode") or "").strip()
             network = NetworkRecord(
-                network_type=_normalize_type(row.get("Type")),
+                network_type=network_type,
                 identifier=_normalize_identifier(row.get("MAC")),
                 name=(row.get("SSID") or "").strip(),
-                capabilities=(row.get("AuthMode") or "").strip(),
-                encryption=(row.get("AuthMode") or "").strip(),
+                capabilities=capabilities,
+                encryption=capabilities if network_type == "WIFI" else "",
                 frequency=_int(row.get("Frequency")),
                 channel=(row.get("Channel") or "").strip(),
             )
@@ -312,12 +314,22 @@ def _parse_kml(path: Path) -> Iterator[tuple[ObservationRecord, RouteRecord | No
                 name = _child_text(element, "name")
                 if name == "(no SSID)":
                     name = ""
+                network_type = _normalize_type(fields.get("type"))
+                capabilities = (
+                    fields.get("capabilities")
+                    or fields.get("attributes")
+                    or ""
+                )
                 network = NetworkRecord(
-                    network_type=_normalize_type(fields.get("type")),
+                    network_type=network_type,
                     identifier=identifier,
                     name=name,
-                    capabilities=fields.get("capabilities", ""),
-                    encryption=fields.get("encryption", ""),
+                    capabilities=capabilities,
+                    encryption=(
+                        fields.get("encryption", "")
+                        if network_type == "WIFI"
+                        else ""
+                    ),
                     frequency=_int(fields.get("frequency")),
                     channel=fields.get("channel", ""),
                 )
@@ -421,12 +433,14 @@ def _parse_sqlite(
                 latitude, longitude = float(row["lat"]), float(row["lon"])
                 if not _valid_coordinates(latitude, longitude):
                     continue
+                network_type = _normalize_type(row["type"])
+                capabilities = row["capabilities"] or ""
                 network = NetworkRecord(
-                    network_type=_normalize_type(row["type"]),
+                    network_type=network_type,
                     identifier=_normalize_identifier(row["bssid"]),
                     name=row["ssid"] or "",
-                    capabilities=row["capabilities"] or "",
-                    encryption=row["capabilities"] or "",
+                    capabilities=capabilities,
+                    encryption=capabilities if network_type == "WIFI" else "",
                     frequency=row["frequency"],
                 )
                 observation = ObservationRecord(

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.queries import wifi_channel_from_frequency
 from app.storage import initialize_database, observation_fingerprint
 
 
@@ -37,9 +38,9 @@ def database(tmp_path: Path) -> Path:
             ("/private/archive/tablet-export.csv", "b" * 64, "2025-02-02T00:00:00Z"),
         )
         networks = [
-            (1, "WIFI", "AA:00:00:00:00:01", 1704110400, 1706788800, 51.5000, -0.1000, -40, 2, 2, "Coffee Shop", "[WPA2][ESS]", 2437, "6"),
+            (1, "WIFI", "AA:00:00:00:00:01", 1704110400, 1706788800, 51.5000, -0.1000, -40, 2, 2, "Coffee Shop", "[WPA2][ESS]", 2437, ""),
             (2, "WIFI", "AA:00:00:00:00:02", 1738411200, 1738411200, 51.5003, -0.1003, -55, 1, 1, "Library WiFi", "[WPA3][ESS]", 5975, "5"),
-            (3, "BLUETOOTH", "AA:00:00:00:00:03", 1740820800, 1740820800, 40.7, -74.0, -70, 1, 1, "Headphones", "", None, ""),
+            (3, "BLUETOOTH", "AA:00:00:00:00:03", 1740820800, 1740820800, 40.7, -74.0, -70, 1, 1, "Headphones", "Uncategorized;10", 7936, ""),
         ]
         db.executemany(
             """
@@ -332,6 +333,24 @@ def test_network_validation(client: TestClient, query: str):
     assert client.get("/api/networks" + query).status_code == 422
 
 
+@pytest.mark.parametrize(
+    ("frequency", "channel"),
+    [
+        (2412, "1"),
+        (2437, "6"),
+        (2484, "14"),
+        (5180, "36"),
+        (5975, "5"),
+        (5935, "2"),
+        (58320, "1"),
+        (7936, None),
+        (None, None),
+    ],
+)
+def test_wifi_channel_from_frequency(frequency: int | None, channel: str | None):
+    assert wifi_channel_from_frequency(frequency) == channel
+
+
 def test_network_and_route_contracts(client: TestClient):
     cluster = client.get("/api/networks?bbox=-1,50,1,52&zoom=8&types=WIFI")
     assert cluster.status_code == 200
@@ -373,6 +392,21 @@ def test_network_and_route_contracts(client: TestClient):
     assert properties["devices"] == ["phone", "tablet"]
     assert properties["first_seen_devices"] == ["phone"]
     assert properties["position_devices"] == ["tablet"]
+
+    derived_channel = client.get(
+        "/api/networks?bbox=-1,50,1,52&zoom=16"
+        "&devices=phone&from=2024-01-01&to=2024-12-31"
+    ).json()["features"][0]["properties"]
+    assert derived_channel["frequency"] == 2437
+    assert derived_channel["channel"] == "6"
+
+    bluetooth = client.get(
+        "/api/networks?bbox=-75,40,-73,41&zoom=16&types=BLUETOOTH"
+    ).json()["features"][0]["properties"]
+    assert bluetooth["frequency"] is None
+    assert bluetooth["channel"] is None
+    assert bluetooth["encryption"] is None
+    assert bluetooth["attributes"] == "Uncategorized;10"
 
 
 def test_network_identifiers_can_be_enabled(

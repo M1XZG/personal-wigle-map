@@ -180,6 +180,29 @@ def test_kml_stream_import_and_failed_file_status(tmp_path):
     assert counts(db)["observations"] == 1
 
 
+def test_kml_preserves_bluetooth_attributes_without_encryption(tmp_path):
+    kml = tmp_path / "imports" / "scanner" / "bluetooth.kml"
+    kml.parent.mkdir(parents=True)
+    kml.write_text(
+        """<kml><Placemark><name>Device</name><description>
+        Network ID: AA:00:00:00:00:03
+        Time: 2026-08-11T10:00:00Z
+        Signal: -70
+        Frequency: 7936
+        Attributes: Uncategorized;10
+        Type: BLE
+        </description><Point><coordinates>-1.7,51.5</coordinates></Point>
+        </Placemark></kml>"""
+    )
+    db = tmp_path / "wigle-map.sqlite"
+
+    assert import_file(kml, db, "scanner")["status"] == "complete"
+    with sqlite3.connect(db) as connection:
+        assert connection.execute(
+            "SELECT capabilities, encryption, frequency FROM networks"
+        ).fetchone() == ("Uncategorized;10", "", 7936)
+
+
 def test_kml_tolerates_invalid_utf8_and_deduplicates_other_formats(tmp_path):
     csv_path = tmp_path / "imports" / "phone" / "2026-08-11" / "sample.csv.gz"
     kml_path = csv_path.with_name("sample.kml")
