@@ -493,6 +493,67 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
 
+    @application.get("/api/network-stacks/{stack_id}")
+    def get_network_stack(
+        stack_id: str,
+        page: int = Query(1, ge=1),
+        per_page: int = Query(25, ge=1, le=queries.NETWORK_STACK_PAGE_LIMIT),
+        types: list[str] | None = Query(None),
+        devices: list[str] | None = Query(None),
+        from_date: str | None = Query(None, alias="from"),
+        to_date: str | None = Query(None, alias="to"),
+    ) -> dict[str, Any]:
+        ensure_database()
+        try:
+            start = queries.parse_date(from_date, "from")
+            end = queries.parse_date(to_date, "to")
+            if start and end and start > end:
+                raise ValueError("from must not be later than to")
+            result = queries.network_stack(
+                db_path,
+                stack_id,
+                page,
+                per_page,
+                _split_values(types),
+                _split_values(devices),
+                start,
+                end,
+                expose_network_identifiers,
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if result["total"] == 0:
+            raise HTTPException(404, "Network stack was not found")
+        return result
+
+    @application.get("/api/networks/{network_id}/observations")
+    def get_network_observations(
+        network_id: int,
+        devices: list[str] | None = Query(None),
+        from_date: str | None = Query(None, alias="from"),
+        to_date: str | None = Query(None, alias="to"),
+    ) -> dict[str, Any]:
+        ensure_database()
+        if network_id < 1:
+            raise HTTPException(422, "network_id must be positive")
+        try:
+            start = queries.parse_date(from_date, "from")
+            end = queries.parse_date(to_date, "to")
+            if start and end and start > end:
+                raise ValueError("from must not be later than to")
+            result = queries.network_observations(
+                db_path,
+                network_id,
+                _split_values(devices),
+                start,
+                end,
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if result is None:
+            raise HTTPException(404, "Network was not found")
+        return result
+
     @application.get("/api/routes")
     def get_routes(
         bbox: str = Query(..., description="west,south,east,north"),

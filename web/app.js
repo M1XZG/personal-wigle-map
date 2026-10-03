@@ -24,7 +24,15 @@ const state = {
   routeColors: new Map(),
   requestNumber: 0,
   mapController: null,
-  debounceTimer: null
+  debounceTimer: null,
+  stackController: null,
+  stackId: null,
+  stackPage: 0,
+  stackHasMore: false,
+  stackFeatures: [],
+  stackAnchor: null,
+  selectedNetworkId: null,
+  observationRequestNumber: 0
 };
 
 const elements = {
@@ -63,7 +71,13 @@ const elements = {
   uploadStatus: document.querySelector("#upload-status"),
   rescanButton: document.querySelector("#rescan-button"),
   refreshImports: document.querySelector("#refresh-imports"),
-  importsList: document.querySelector("#imports-list")
+  importsList: document.querySelector("#imports-list"),
+  stackDrawer: document.querySelector("#stack-drawer"),
+  stackDrawerTitle: document.querySelector("#stack-drawer-title"),
+  stackDrawerStatus: document.querySelector("#stack-drawer-status"),
+  stackNetworkList: document.querySelector("#stack-network-list"),
+  stackLoadMore: document.querySelector("#stack-load-more"),
+  stackDrawerClose: document.querySelector("#stack-drawer-close")
 };
 
 const map = L.map("map", {
@@ -82,8 +96,12 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
 
 const networkLayer = L.layerGroup().addTo(map);
 const routeLayer = L.layerGroup().addTo(map);
+const observationLayer = L.layerGroup().addTo(map);
+const spiderLayer = L.layerGroup().addTo(map);
 map.createPane("routePane");
 map.getPane("routePane").style.zIndex = 390;
+map.createPane("observationPane");
+map.getPane("observationPane").style.zIndex = 405;
 map.createPane("networkPane");
 map.getPane("networkPane").style.zIndex = 410;
 
@@ -281,22 +299,26 @@ function selectedDevices() {
   return Array.from(elements.deviceFilter.selectedOptions, option => option.value);
 }
 
-function filterParams(includeTypes) {
-  const bounds = map.getBounds();
-  const params = new URLSearchParams({
-    bbox: [
-      Math.max(-180, bounds.getWest()).toFixed(6),
-      Math.max(-90, bounds.getSouth()).toFixed(6),
-      Math.min(180, bounds.getEast()).toFixed(6),
-      Math.min(90, bounds.getNorth()).toFixed(6)
-    ].join(","),
-    zoom: String(map.getZoom())
-  });
+function selectionFilterParams(includeTypes) {
+  const params = new URLSearchParams();
   if (includeTypes) params.set("types", activeTypes().join(","));
   const devices = selectedDevices();
   if (devices.length) params.set("devices", devices.join(","));
   if (elements.fromDate.value) params.set("from", elements.fromDate.value);
   if (elements.toDate.value) params.set("to", elements.toDate.value);
+  return params;
+}
+
+function filterParams(includeTypes) {
+  const bounds = map.getBounds();
+  const params = selectionFilterParams(includeTypes);
+  params.set("bbox", [
+    Math.max(-180, bounds.getWest()).toFixed(6),
+    Math.max(-90, bounds.getSouth()).toFixed(6),
+    Math.min(180, bounds.getEast()).toFixed(6),
+    Math.min(90, bounds.getNorth()).toFixed(6)
+  ].join(","));
+  params.set("zoom", String(map.getZoom()));
   return params;
 }
 
@@ -339,6 +361,198 @@ function clusterMarker(feature) {
     keyboard: true,
     title: `${formatNumber(count)} networks in this area`
   }).on("click", () => map.flyTo(point, Math.min(map.getZoom() + 2, 18)));
+}
+
+function networkDisplayName(properties) {
+  const type = TYPE_META[typeCode(properties)]?.label || "Network";
+  return String(pick(
+    properties,
+    ["ssid", "name", "network_name", "label"],
+    `Unnamed ${type}${properties?.id ? ` #${properties.id}` : ""}`
+  ));
+}
+
+function stackMarker(feature) {
+  const point = featurePoint(feature);
+  if (!point) return null;
+  const properties = feature.properties || {};
+  const count = Math.max(2, Number(properties.count) || 2);
+  const size = Math.max(38, Math.min(62, 34 + Math.log2(count) * 3));
+  const typeCounts = properties.type_counts || {};
+  const dots = [
+    ["WIFI", TYPE_META.WIFI.color],
+    ["BLE", TYPE_META.BLE.color],
+    ["BLUETOOTH", TYPE_META.BLUETOOTH.color],
+    ["CELLULAR", TYPE_META.LTE.color]
+  ].filter(([type]) => Number(typeCounts[type]) > 0);
+  const icon = L.divIcon({
+    className: "",
+    html: `
+      <div class="stack-icon" style="width:${size}px;height:${size}px"
+           aria-label="${escapeHtml(count)} networks at this location">
+        ${escapeHtml(count > 999 ? `${Math.round(count / 100) / 10}k` : count)}
+        <span class="stack-icon-types">
+          ${dots.map(([, color]) => `<i style="background:${color}"></i>`).join("")}
+        </span>
+      </div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2]
+  });
+  return L.marker(point, {
+    icon,
+    keyboard: true,
+    title: `${formatNumber(count)} networks at this location`
+  }).on("click", () => openNetworkStack(feature));
+}
+
+function closeStackDrawer() {
+  if (state.stackController) state.stackController.abort();
+  state.stackController = null;
+  state.stackId = null;
+  state.stackPage = 0;
+  state.stackHasMore = false;
+  state.stackFeatures = [];
+  state.stackAnchor = null;
+  elements.stackDrawer.hidden = true;
+  elements.stackNetworkList.replaceChildren();
+  elements.stackLoadMore.hidden = true;
+  spiderLayer.clearLayers();
+}
+
+function clearSelectedNetwork() {
+  state.selectedNetworkId = null;
+  state.observationRequestNumber += 1;
+  observationLayer.clearLayers();
+}
+
+function stackRow(feature) {
+  const properties = feature.properties || {};
+  const code = typeCode(properties);
+  const meta = TYPE_META[code] || TYPE_META.WIFI;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "stack-network-row";
+  button.dataset.networkId = String(properties.id || "");
+
+  const dot = document.createElement("i");
+  dot.className = "stack-network-dot";
+  dot.style.backgroundColor = meta.color;
+
+  const name = document.createElement("span");
+  name.className = "stack-network-name";
+  name.textContent = networkDisplayName(properties);
+
+  const details = document.createElement("span");
+  details.className = "stack-network-meta";
+  const signal = properties.best_signal;
+  const signalText = signal === null || signal === undefined
+    ? "signal unavailable"
+    : `${signal} dBm`;
+  details.textContent = `${meta.label} · ${signalText} · ${formatNumber(properties.observation_count)} observations`;
+
+  button.append(dot, name, details);
+  button.addEventListener("click", () => {
+    elements.stackNetworkList.querySelectorAll(".stack-network-row").forEach(row => {
+      row.classList.toggle("selected", row === button);
+    });
+    selectNetworkFeature(feature, state.stackAnchor, true);
+  });
+  return button;
+}
+
+function renderSpiderfy(features, anchor) {
+  spiderLayer.clearLayers();
+  if (!anchor || features.length < 2 || features.length > 8) return;
+  const center = map.latLngToLayerPoint(anchor);
+  const radius = 38 + features.length * 2;
+  features.forEach((feature, index) => {
+    const angle = -Math.PI / 2 + (Math.PI * 2 * index) / features.length;
+    const expandedPoint = L.point(
+      center.x + Math.cos(angle) * radius,
+      center.y + Math.sin(angle) * radius
+    );
+    const expanded = map.layerPointToLatLng(expandedPoint);
+    const properties = feature.properties || {};
+    const meta = TYPE_META[typeCode(properties)] || TYPE_META.WIFI;
+    L.polyline([anchor, expanded], {
+      pane: "observationPane",
+      color: "#6f6076",
+      weight: 1.5,
+      opacity: 0.75,
+      interactive: false
+    }).addTo(spiderLayer);
+    L.circleMarker(expanded, {
+      pane: "networkPane",
+      radius: 7,
+      color: "#ffffff",
+      weight: 2,
+      fillColor: meta.color,
+      fillOpacity: 0.95,
+      bubblingMouseEvents: false
+    })
+      .bindTooltip(escapeHtml(networkDisplayName(properties)), {
+        direction: "top"
+      })
+      .on("click", () => selectNetworkFeature(feature, expanded, true))
+      .addTo(spiderLayer);
+  });
+}
+
+async function loadStackPage(reset = false) {
+  if (!state.stackId) return;
+  if (state.stackController) state.stackController.abort();
+  const controller = new AbortController();
+  state.stackController = controller;
+  const stackId = state.stackId;
+  const page = reset ? 1 : state.stackPage + 1;
+  const params = selectionFilterParams(true);
+  params.set("page", String(page));
+  params.set("per_page", "25");
+  elements.stackLoadMore.disabled = true;
+  elements.stackDrawerStatus.textContent = "Loading networks…";
+  try {
+    const body = await fetchJson(
+      `/api/network-stacks/${encodeURIComponent(stackId)}?${params}`,
+      { signal: controller.signal }
+    );
+    if (controller.signal.aborted || stackId !== state.stackId) return;
+    const features = Array.isArray(body?.features) ? body.features : [];
+    if (reset) {
+      state.stackFeatures = [];
+      elements.stackNetworkList.replaceChildren();
+    }
+    state.stackFeatures.push(...features);
+    features.forEach(feature => elements.stackNetworkList.append(stackRow(feature)));
+    state.stackPage = Number(body?.page) || page;
+    state.stackHasMore = Boolean(body?.has_more);
+    elements.stackLoadMore.hidden = !state.stackHasMore;
+    elements.stackDrawerStatus.textContent =
+      `Showing ${formatNumber(state.stackFeatures.length)} of ${formatNumber(body?.total)} networks.`;
+    if (reset && Number(body?.total) <= 8) {
+      renderSpiderfy(state.stackFeatures, state.stackAnchor);
+    }
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    elements.stackDrawerStatus.textContent =
+      `Stack unavailable: ${errorMessage(error, "Unknown API error")}`;
+  } finally {
+    if (state.stackController === controller) state.stackController = null;
+    elements.stackLoadMore.disabled = false;
+  }
+}
+
+function openNetworkStack(feature) {
+  closeStackDrawer();
+  clearSelectedNetwork();
+  const properties = feature.properties || {};
+  state.stackId = String(properties.stack_id || "");
+  state.stackAnchor = featurePoint(feature);
+  if (!state.stackId || !state.stackAnchor) return;
+  elements.stackDrawerTitle.textContent =
+    `${formatNumber(properties.count)} networks at this location`;
+  elements.stackDrawerStatus.textContent = "Loading networks…";
+  elements.stackDrawer.hidden = false;
+  loadStackPage(true);
 }
 
 function popupHtml(properties) {
@@ -417,6 +631,76 @@ function popupHtml(properties) {
     </dl>`;
 }
 
+function renderObservationLocations(data) {
+  observationLayer.clearLayers();
+  const features = Array.isArray(data?.features) ? data.features : [];
+  features.forEach(feature => {
+    const point = featurePoint(feature);
+    if (!point) return;
+    const properties = feature.properties || {};
+    const count = Math.max(1, Number(properties.observation_count) || 1);
+    const radius = Math.max(6, Math.min(14, 5 + Math.log2(count + 1) * 2));
+    const marker = L.circleMarker(point, {
+      pane: "observationPane",
+      radius,
+      color: "#fde047",
+      weight: 3,
+      fillColor: "#fef08a",
+      fillOpacity: 0.24,
+      bubblingMouseEvents: false
+    });
+    const devices = deviceList(properties, "devices");
+    const tooltip = [
+      `${formatNumber(count)} observation${count === 1 ? "" : "s"}`,
+      `${formatDate(properties.first_seen, true)} – ${formatDate(properties.last_seen, true)}`,
+      devices.length ? `Devices: ${devices.join(", ")}` : ""
+    ].filter(Boolean).map(escapeHtml).join("<br>");
+    marker.bindTooltip(tooltip, { direction: "top", sticky: true });
+    marker.addTo(observationLayer);
+  });
+}
+
+async function loadNetworkObservations(networkId) {
+  const numericId = Number(networkId);
+  if (!Number.isInteger(numericId) || numericId < 1) return;
+  state.selectedNetworkId = numericId;
+  const requestNumber = ++state.observationRequestNumber;
+  observationLayer.clearLayers();
+  try {
+    const params = selectionFilterParams(false);
+    const body = await fetchJson(
+      `/api/networks/${numericId}/observations?${params}`
+    );
+    if (
+      requestNumber !== state.observationRequestNumber
+      || state.selectedNetworkId !== numericId
+    ) return;
+    renderObservationLocations(body);
+    if (body?.truncated) {
+      showApiAlert("Observation highlighting was limited to 1,000 records.");
+    }
+  } catch (error) {
+    if (requestNumber !== state.observationRequestNumber) return;
+    showApiAlert(
+      `Observation history unavailable: ${errorMessage(error, "Unknown API error")}`
+    );
+  }
+}
+
+function selectNetworkFeature(feature, popupPoint = null, openPopup = true) {
+  const properties = feature?.properties || {};
+  if (openPopup) {
+    const point = popupPoint || featurePoint(feature);
+    if (point) {
+      L.popup({ maxWidth: 290, autoPan: false })
+        .setLatLng(point)
+        .setContent(popupHtml(properties))
+        .openOn(map);
+    }
+  }
+  loadNetworkObservations(properties.id);
+}
+
 function pointMarker(feature) {
   const point = featurePoint(feature);
   if (!point) return null;
@@ -435,7 +719,8 @@ function pointMarker(feature) {
     fillOpacity: elements.densityMode.checked ? 0.42 : 0.82,
     bubblingMouseEvents: false
   });
-  marker.bindPopup(popupHtml(properties), { maxWidth: 290 });
+  marker.bindPopup(popupHtml(properties), { maxWidth: 290, autoPan: false });
+  marker.on("click", () => selectNetworkFeature(feature, point, false));
   return marker;
 }
 
@@ -445,7 +730,12 @@ function renderNetworks(data) {
   features.forEach(feature => {
     const properties = feature.properties || {};
     const isCluster = properties.cluster === true || properties.cluster === 1 || properties.cluster === "true";
-    const marker = isCluster ? clusterMarker(feature) : pointMarker(feature);
+    const isStack = properties.stack === true || properties.stack === 1 || properties.stack === "true";
+    const marker = isCluster
+      ? clusterMarker(feature)
+      : isStack
+        ? stackMarker(feature)
+        : pointMarker(feature);
     if (marker) networkLayer.addLayer(marker);
   });
   return features.length;
@@ -569,6 +859,7 @@ function setSidebarCollapsed(collapsed) {
 }
 
 function resetFilters() {
+  resetMapSelection();
   document.querySelectorAll('input[name="network-type"]').forEach(input => {
     input.checked = true;
   });
@@ -775,7 +1066,15 @@ async function rescan() {
   }
 }
 
+function resetMapSelection() {
+  closeStackDrawer();
+  clearSelectedNetwork();
+}
+
+map.on("dragstart zoomstart", resetMapSelection);
 map.on("moveend zoomend", () => scheduleMapRefresh());
+elements.stackDrawerClose.addEventListener("click", closeStackDrawer);
+elements.stackLoadMore.addEventListener("click", () => loadStackPage(false));
 elements.sidebarToggle.addEventListener("click", () => {
   setSidebarCollapsed(!elements.sidebar.classList.contains("collapsed"));
 });
@@ -785,11 +1084,23 @@ document.querySelector(".brand").addEventListener("click", () => {
   }
 });
 document.querySelectorAll('input[name="network-type"]').forEach(input => {
-  input.addEventListener("change", () => scheduleMapRefresh(0));
+  input.addEventListener("change", () => {
+    resetMapSelection();
+    scheduleMapRefresh(0);
+  });
 });
-elements.deviceFilter.addEventListener("change", () => scheduleMapRefresh(0));
-elements.fromDate.addEventListener("change", () => scheduleMapRefresh(0));
-elements.toDate.addEventListener("change", () => scheduleMapRefresh(0));
+elements.deviceFilter.addEventListener("change", () => {
+  resetMapSelection();
+  scheduleMapRefresh(0);
+});
+elements.fromDate.addEventListener("change", () => {
+  resetMapSelection();
+  scheduleMapRefresh(0);
+});
+elements.toDate.addEventListener("change", () => {
+  resetMapSelection();
+  scheduleMapRefresh(0);
+});
 elements.showRoutes.addEventListener("change", () => {
   if (!elements.showRoutes.checked) {
     routeLayer.clearLayers();

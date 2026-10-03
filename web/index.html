@@ -182,6 +182,23 @@
       </div>
     </aside>
 
+    <aside id="stack-drawer" class="stack-drawer" aria-labelledby="stack-drawer-title" hidden>
+      <header class="stack-drawer-header">
+        <div>
+          <p class="eyebrow">Shared map position</p>
+          <h2 id="stack-drawer-title">Networks at this location</h2>
+        </div>
+        <button id="stack-drawer-close" class="icon-button" type="button"
+                aria-label="Close network stack">×</button>
+      </header>
+      <p id="stack-drawer-status" class="stack-drawer-status" role="status"
+         aria-live="polite">Choose a network to inspect.</p>
+      <div id="stack-network-list" class="stack-network-list"></div>
+      <button id="stack-load-more" class="secondary-button" type="button" hidden>
+        Load more networks
+      </button>
+    </aside>
+
     <div id="map-state" class="map-state" role="status" aria-live="polite" hidden>
       <span class="spinner" aria-hidden="true"></span>
       <span id="map-state-text">Loading map data…</span>

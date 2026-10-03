@@ -5,6 +5,12 @@ exports. It imports WiGLE SQLite databases, CSV or CSV.GZ exports, KML files
 and timed GPX tracks, deduplicates overlapping observations, and displays
 network density and survey routes through a Leaflet interface.
 
+At high zoom, networks sharing an exact map position are represented by a
+counted stack marker. Selecting it opens a paginated network list; stacks of up
+to eight networks also fan out around the true position. Selecting a network
+highlights each distinct location where it was observed without drawing a
+misleading route between those locations.
+
 The API hides SSIDs and network identifiers by default, but the source files
 and SQLite database still contain sensitive location data. Run this on a
 trusted LAN and do not publish port 8787 to the internet.

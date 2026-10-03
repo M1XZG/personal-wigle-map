@@ -6,8 +6,11 @@ localized. All externally supplied values are bound parameters.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import math
 import sqlite3
+import struct
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -16,6 +19,8 @@ from typing import Any, Iterable
 
 NETWORK_POINT_LIMIT = 5_000
 NETWORK_CLUSTER_LIMIT = 2_000
+NETWORK_STACK_PAGE_LIMIT = 50
+NETWORK_OBSERVATION_LIMIT = 1_000
 ROUTE_LIMIT = 2_000
 ROUTE_POINT_LIMIT = 200_000
 WIFI_5_GHZ_CHANNELS = frozenset(
@@ -90,20 +95,14 @@ def _in_clause(values: Iterable[str], params: list[Any]) -> str:
     return "(" + ",".join("?" for _ in cleaned) + ")"
 
 
-def _network_filters(
-    bounds: Bounds,
+def _network_nonspatial_filters(
     types: list[str],
     devices: list[str],
     from_date: str | None,
     to_date: str | None,
 ) -> tuple[str, list[Any]]:
-    clauses = [
-        "n.best_longitude >= ?",
-        "n.best_longitude <= ?",
-        "n.best_latitude >= ?",
-        "n.best_latitude <= ?",
-    ]
-    params: list[Any] = [bounds.west, bounds.east, bounds.south, bounds.north]
+    clauses: list[str] = []
+    params: list[Any] = []
     if types:
         clauses.append(f"n.network_type IN {_in_clause(types, params)}")
     if from_date:
@@ -120,6 +119,29 @@ def _network_filters(
             "WHERE o.network_id = n.id AND os.source_device IN "
             f"{device_clause})"
         )
+    return " AND ".join(clauses), params
+
+
+def _network_filters(
+    bounds: Bounds,
+    types: list[str],
+    devices: list[str],
+    from_date: str | None,
+    to_date: str | None,
+) -> tuple[str, list[Any]]:
+    clauses = [
+        "n.best_longitude >= ?",
+        "n.best_longitude <= ?",
+        "n.best_latitude >= ?",
+        "n.best_latitude <= ?",
+    ]
+    params: list[Any] = [bounds.west, bounds.east, bounds.south, bounds.north]
+    extra_where, extra_params = _network_nonspatial_filters(
+        types, devices, from_date, to_date
+    )
+    if extra_where:
+        clauses.append(extra_where)
+        params.extend(extra_params)
     return " AND ".join(clauses), params
 
 
@@ -229,6 +251,92 @@ def _network_radio_properties(row: sqlite3.Row) -> dict[str, Any]:
         "attributes": None,
         "frequency": valid_frequency,
         "channel": stored_channel or derived_channel,
+    }
+
+
+def _stack_id(latitude: float, longitude: float) -> str:
+    encoded = base64.urlsafe_b64encode(
+        struct.pack("!dd", latitude, longitude)
+    ).decode("ascii")
+    return encoded.rstrip("=")
+
+
+def parse_stack_id(value: str) -> tuple[float, float]:
+    try:
+        padding = "=" * (-len(value) % 4)
+        raw = base64.urlsafe_b64decode(value + padding)
+        if len(raw) != 16:
+            raise ValueError
+        latitude, longitude = struct.unpack("!dd", raw)
+    except (ValueError, binascii.Error, struct.error) as exc:
+        raise ValueError("invalid stack identifier") from exc
+    if not (
+        math.isfinite(latitude)
+        and math.isfinite(longitude)
+        and -90 <= latitude <= 90
+        and -180 <= longitude <= 180
+    ):
+        raise ValueError("invalid stack identifier")
+    return latitude, longitude
+
+
+def _network_detail_rows(
+    db: sqlite3.Connection,
+    network_ids: list[int],
+) -> list[sqlite3.Row]:
+    rows: list[sqlite3.Row] = []
+    for batch in _chunks(network_ids):
+        placeholders = ",".join("?" for _ in batch)
+        rows.extend(
+            db.execute(
+                "SELECT n.id, n.network_type, n.name, n.identifier, "
+                "n.first_seen, n.last_seen, n.best_latitude, n.best_longitude, "
+                "n.best_signal, n.observation_count, n.encryption, "
+                "n.capabilities, n.frequency, n.channel, "
+                "best.id AS best_observation_id, best.accuracy AS best_accuracy "
+                "FROM networks n "
+                "LEFT JOIN observations best ON best.id = ("
+                "SELECT o.id FROM observations o WHERE o.network_id = n.id "
+                "ORDER BY o.signal IS NULL, o.signal DESC, "
+                "o.accuracy IS NULL, o.accuracy ASC, "
+                "o.observed_at, o.latitude, o.longitude, "
+                "o.observation_hash LIMIT 1"
+                ") "
+                f"WHERE n.id IN ({placeholders})",
+                batch,
+            ).fetchall()
+        )
+    by_id = {row["id"]: row for row in rows}
+    return [by_id[network_id] for network_id in network_ids if network_id in by_id]
+
+
+def _network_feature(
+    row: sqlite3.Row,
+    provenance: dict[int, dict[str, list[str]]],
+    include_identifiers: bool,
+) -> dict[str, Any]:
+    properties = {
+        "id": row["id"],
+        "type": row["network_type"],
+        "first_seen": _iso_timestamp(row["first_seen"]),
+        "last_seen": _iso_timestamp(row["last_seen"]),
+        "best_signal": row["best_signal"],
+        "observation_count": row["observation_count"],
+        "accuracy": row["best_accuracy"],
+        **_network_radio_properties(row),
+        **provenance[row["id"]],
+    }
+    if include_identifiers:
+        if row["name"]:
+            properties["name"] = row["name"]
+        properties["identifier"] = row["identifier"]
+    return {
+        "type": "Feature",
+        "geometry": {
+            "type": "Point",
+            "coordinates": [row["best_longitude"], row["best_latitude"]],
+        },
+        "properties": properties,
     }
 
 
@@ -359,56 +467,68 @@ def networks(
     where, params = _network_filters(bounds, types, devices, from_date, to_date)
     if zoom >= 15:
         sql = (
-            "SELECT n.id, n.network_type, n.name, n.identifier, "
-            "n.first_seen, n.last_seen, "
-            "n.best_latitude, n.best_longitude, n.best_signal, n.observation_count, "
-            "n.encryption, n.capabilities, n.frequency, n.channel, "
-            "best.id AS best_observation_id, best.accuracy AS best_accuracy "
-            "FROM networks n "
-            "LEFT JOIN observations best ON best.id = ("
-            "SELECT o.id FROM observations o WHERE o.network_id = n.id "
-            "ORDER BY o.signal IS NULL, o.signal DESC, "
-            "o.accuracy IS NULL, o.accuracy ASC, "
-            "o.observed_at, o.latitude, o.longitude, o.observation_hash LIMIT 1"
-            ") "
-            f"WHERE {where} "
-            "ORDER BY n.last_seen DESC LIMIT ?"
+            "SELECT MIN(n.id) AS network_id, n.best_latitude, n.best_longitude, "
+            "COUNT(*) AS count, MAX(n.last_seen) AS latest, "
+            "SUM(n.network_type = 'WIFI') AS wifi_count, "
+            "SUM(n.network_type = 'BLE') AS ble_count, "
+            "SUM(n.network_type = 'BLUETOOTH') AS bluetooth_count, "
+            "SUM(n.network_type IN ('GSM','LTE','CDMA','WCDMA','NR')) "
+            "AS cellular_count "
+            f"FROM networks n WHERE {where} "
+            "GROUP BY n.best_latitude, n.best_longitude "
+            "ORDER BY latest DESC LIMIT ?"
         )
         with connect(db_path) as db:
-            rows = db.execute(sql, [*params, NETWORK_POINT_LIMIT + 1]).fetchall()
-            returned_rows = rows[:NETWORK_POINT_LIMIT]
-            provenance = _network_device_provenance(db, returned_rows)
-        truncated = len(rows) > NETWORK_POINT_LIMIT
+            positions = db.execute(
+                sql, [*params, NETWORK_POINT_LIMIT + 1]
+            ).fetchall()
+            returned_positions = positions[:NETWORK_POINT_LIMIT]
+            singleton_ids = [
+                row["network_id"] for row in returned_positions if row["count"] == 1
+            ]
+            singleton_rows = _network_detail_rows(db, singleton_ids)
+            provenance = _network_device_provenance(db, singleton_rows)
+        singleton_features = {
+            row["id"]: _network_feature(row, provenance, include_identifiers)
+            for row in singleton_rows
+        }
         features = []
-        for row in returned_rows:
-            properties = {
-                "id": row["id"],
-                "type": row["network_type"],
-                "first_seen": _iso_timestamp(row["first_seen"]),
-                "last_seen": _iso_timestamp(row["last_seen"]),
-                "best_signal": row["best_signal"],
-                "observation_count": row["observation_count"],
-                "accuracy": row["best_accuracy"],
-                **_network_radio_properties(row),
-                **provenance[row["id"]],
-            }
-            if include_identifiers:
-                if row["name"]:
-                    properties["name"] = row["name"]
-                properties["identifier"] = row["identifier"]
-            features.append({
-                "type": "Feature",
-                "geometry": {
-                    "type": "Point",
-                    "coordinates": [row["best_longitude"], row["best_latitude"]],
-                },
-                "properties": properties,
-            })
+        for row in returned_positions:
+            if row["count"] == 1:
+                feature = singleton_features.get(row["network_id"])
+                if feature:
+                    features.append(feature)
+                continue
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                            row["best_longitude"],
+                            row["best_latitude"],
+                        ],
+                    },
+                    "properties": {
+                        "stack": True,
+                        "stack_id": _stack_id(
+                            row["best_latitude"], row["best_longitude"]
+                        ),
+                        "count": row["count"],
+                        "type_counts": {
+                            "WIFI": row["wifi_count"],
+                            "BLE": row["ble_count"],
+                            "BLUETOOTH": row["bluetooth_count"],
+                            "CELLULAR": row["cellular_count"],
+                        },
+                    },
+                }
+            )
         return {
             "type": "FeatureCollection",
             "mode": "points",
             "zoom": zoom,
-            "truncated": truncated,
+            "truncated": len(positions) > NETWORK_POINT_LIMIT,
             "features": features,
         }
 
@@ -443,6 +563,175 @@ def networks(
         "zoom": zoom,
         "cell_size": cell_size,
         "truncated": truncated,
+        "features": features,
+    }
+
+
+def network_stack(
+    db_path: Path | str,
+    stack_id: str,
+    page: int,
+    per_page: int,
+    types: list[str],
+    devices: list[str],
+    from_date: str | None,
+    to_date: str | None,
+    include_identifiers: bool = False,
+) -> dict[str, Any]:
+    latitude, longitude = parse_stack_id(stack_id)
+    extra_where, params = _network_nonspatial_filters(
+        types, devices, from_date, to_date
+    )
+    clauses = ["n.best_latitude = ?", "n.best_longitude = ?"]
+    query_params: list[Any] = [latitude, longitude]
+    if extra_where:
+        clauses.append(extra_where)
+        query_params.extend(params)
+    where = " AND ".join(clauses)
+    offset = (page - 1) * per_page
+    with connect(db_path) as db:
+        total = db.execute(
+            f"SELECT COUNT(*) FROM networks n WHERE {where}",
+            query_params,
+        ).fetchone()[0]
+        ids = [
+            row["id"]
+            for row in db.execute(
+                f"SELECT n.id FROM networks n WHERE {where} "
+                "ORDER BY n.last_seen DESC, n.id LIMIT ? OFFSET ?",
+                [*query_params, per_page, offset],
+            )
+        ]
+        rows = _network_detail_rows(db, ids)
+        provenance = _network_device_provenance(db, rows)
+    return {
+        "stack_id": stack_id,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "has_more": offset + len(rows) < total,
+        "features": [
+            _network_feature(row, provenance, include_identifiers)
+            for row in rows
+        ],
+    }
+
+
+def network_observations(
+    db_path: Path | str,
+    network_id: int,
+    devices: list[str],
+    from_date: str | None,
+    to_date: str | None,
+    limit: int = NETWORK_OBSERVATION_LIMIT,
+) -> dict[str, Any] | None:
+    clauses = ["o.network_id = ?"]
+    params: list[Any] = [network_id]
+    if from_date:
+        clauses.append("o.observed_at >= ?")
+        params.append(_date_epoch(from_date))
+    if to_date:
+        clauses.append("o.observed_at < ?")
+        params.append(_date_epoch(to_date, next_day=True))
+    if devices:
+        device_clause = _in_clause(devices, params)
+        clauses.append(
+            "EXISTS (SELECT 1 FROM observation_sources filtered "
+            "WHERE filtered.observation_id = o.id "
+            f"AND filtered.source_device IN {device_clause})"
+        )
+    where = " AND ".join(clauses)
+    with connect(db_path) as db:
+        network = db.execute(
+            "SELECT 1 FROM networks WHERE id = ?",
+            (network_id,),
+        ).fetchone()
+        if network is None:
+            return None
+        total = db.execute(
+            f"SELECT COUNT(*) FROM observations o WHERE {where}",
+            params,
+        ).fetchone()[0]
+        rows = db.execute(
+            f"""
+            SELECT id, observed_at, latitude, longitude, signal, accuracy
+            FROM observations o
+            WHERE {where}
+            ORDER BY observed_at, id
+            LIMIT ?
+            """,
+            [*params, limit + 1],
+        ).fetchall()
+        returned_rows = rows[:limit]
+        source_devices: dict[int, set[str]] = {
+            row["id"]: set() for row in returned_rows
+        }
+        for batch in _chunks(list(source_devices)):
+            placeholders = ",".join("?" for _ in batch)
+            for source in db.execute(
+                "SELECT observation_id, source_device "
+                "FROM observation_sources "
+                f"WHERE observation_id IN ({placeholders})",
+                batch,
+            ):
+                source_devices[source["observation_id"]].add(
+                    source["source_device"]
+                )
+
+    locations: dict[tuple[float, float], dict[str, Any]] = {}
+    for row in returned_rows:
+        key = (row["latitude"], row["longitude"])
+        location = locations.setdefault(
+            key,
+            {
+                "count": 0,
+                "first_seen": row["observed_at"],
+                "last_seen": row["observed_at"],
+                "best_signal": row["signal"],
+                "accuracy": row["accuracy"],
+                "devices": set(),
+            },
+        )
+        location["count"] += 1
+        location["first_seen"] = min(location["first_seen"], row["observed_at"])
+        location["last_seen"] = max(location["last_seen"], row["observed_at"])
+        if row["signal"] is not None and (
+            location["best_signal"] is None
+            or row["signal"] > location["best_signal"]
+        ):
+            location["best_signal"] = row["signal"]
+        if row["accuracy"] is not None and (
+            location["accuracy"] is None
+            or row["accuracy"] < location["accuracy"]
+        ):
+            location["accuracy"] = row["accuracy"]
+        location["devices"].update(source_devices[row["id"]])
+
+    features = [
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [longitude, latitude],
+            },
+            "properties": {
+                "observation_count": values["count"],
+                "first_seen": _iso_timestamp(values["first_seen"]),
+                "last_seen": _iso_timestamp(values["last_seen"]),
+                "best_signal": values["best_signal"],
+                "accuracy": values["accuracy"],
+                "devices": sorted(values["devices"]),
+            },
+        }
+        for (latitude, longitude), values in locations.items()
+    ]
+    return {
+        "type": "FeatureCollection",
+        "network_id": network_id,
+        "total_observations": total,
+        "returned_observations": len(returned_rows),
+        "distinct_locations": len(features),
+        "truncated": len(rows) > limit,
         "features": features,
     }
 
