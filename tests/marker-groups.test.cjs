@@ -8,61 +8,52 @@ const web = join(__dirname, "..", "web");
 const groupingSource = readFileSync(join(web, "marker-groups.js"), "utf8");
 const helpers = vm.createContext({});
 vm.runInContext(groupingSource, helpers);
-const { groupScreenMarkers, stackMarkerSize } = helpers;
+const { screenMarkersAtPoint } = helpers;
 const plain = value => JSON.parse(JSON.stringify(value));
-const item = (x, count, radius = stackMarkerSize(count) / 2, y = 0) =>
+const item = (x, count = 1, radius = 7, y = 0) =>
   ({ x, y, count, radius });
 
-test("7 and 8 overlapping stacks combine to 15 without modifying input", () => {
-  const items = [item(0, 7), item(24, 8)];
+test("click selects nearby 7 and 8 stacks without moving their dots", () => {
+  const items = [item(0, 7), item(20, 8)];
   const before = plain(items);
-  const groups = groupScreenMarkers(items);
-  assert.equal(groups.length, 1);
-  assert.equal(groups[0].count, 15);
-  assert.equal(groups[0].members.length, 2);
+  const found = screenMarkersAtPoint(items, { x: 10, y: 0 });
+  assert.equal(found.length, 2);
+  assert.equal(found.reduce((sum, point) => sum + point.count, 0), 15);
   assert.deepEqual(items, before);
-  assert.deepEqual(plain(groupScreenMarkers([...items].reverse())), plain(groups));
 });
 
-test("zoom separates two locations again from the original inputs", () => {
-  assert.equal(groupScreenMarkers([item(0, 7), item(24, 8)]).length, 1);
-  assert.equal(groupScreenMarkers([item(0, 7), item(24 * 4, 8)]).length, 2);
+test("zoom limits the hit to the nearer location", () => {
+  const found = screenMarkersAtPoint([item(0, 7), item(20 * 4, 8)], { x: 0, y: 0 });
+  assert.equal(found.length, 1);
+  assert.equal(found[0].count, 7);
 });
 
-test("singles and density-sized markers cannot hide behind stacks", () => {
-  assert.equal(groupScreenMarkers([item(0, 7), item(25, 1, 7)])[0].count, 8);
-  assert.equal(groupScreenMarkers([item(0, 1, 7), item(30, 1, 7)]).length, 2);
-  assert.equal(groupScreenMarkers([item(0, 1, 25), item(30, 1, 25)]).length, 1);
+test("hit testing respects dot size including density emphasis", () => {
+  const click = { x: 25, y: 0 };
+  assert.equal(screenMarkersAtPoint([item(0)], click).length, 0);
+  assert.equal(screenMarkersAtPoint([item(0, 1, 25)], click).length, 1);
 });
 
-test("merging accounts for transitive overlap and newly enlarged badges", () => {
-  const groups = groupScreenMarkers([item(0, 1, 7), item(15, 1, 7), item(35, 1, 7)]);
-  assert.equal(groups.length, 1);
-  assert.equal(groups[0].count, 3);
-  const expanded = groupScreenMarkers([item(0, 1, 7), item(10, 1, 7), item(34, 1, 7)]);
-  assert.equal(expanded.length, 1);
+test("overlapping chains never extend the selection beyond the click radius", () => {
+  const points = Array.from({ length: 500 }, (_, i) => item(i * 10));
+  const found = screenMarkersAtPoint(points, { x: 100, y: 0 });
+  assert.deepEqual(plain(found).map(point => point.x), [100, 90, 110]);
+  assert.equal(points.length, 500);
 });
 
-test("cell boundaries, negative positions and distant markers are correct", () => {
-  const groups = groupScreenMarkers([item(-1, 7), item(1, 8), item(400, 2)]);
-  assert.deepEqual(plain(groups).map(group => group.count).sort((a, b) => a - b), [2, 15]);
-  assert.equal(groupScreenMarkers([]).length, 0);
-  assert.equal(groupScreenMarkers([item(1, 1, 7)])[0].radius, 7);
+test("empty route sections have no hidden clickable groups", () => {
+  const points = [item(-10, 7), item(10, 8), item(400, 2)];
+  assert.equal(screenMarkersAtPoint(points, { x: 200, y: 0 }).length, 0);
+  assert.equal(screenMarkersAtPoint([], { x: 0, y: 0 }).length, 0);
+  assert.equal(screenMarkersAtPoint(points, { x: 0, y: 50 }).length, 0);
 });
 
-test("5,000 locations preserve counts and leave no overlapping output badges", () => {
-  const items = Array.from({ length: 5000 }, (_, i) =>
-    item((i % 100) * 40, 2 + i % 10, undefined, Math.floor(i / 100) * 90));
-  const groups = groupScreenMarkers(items);
-  assert.equal(groups.reduce((sum, group) => sum + group.count, 0),
-    items.reduce((sum, point) => sum + point.count, 0));
-  assert.equal(groups.reduce((sum, group) => sum + group.members.length, 0), 5000);
-  for (let i = 0; i < groups.length; i++) {
-    for (let j = i + 1; j < groups.length; j++) {
-      assert.ok(Math.hypot(groups[i].x - groups[j].x, groups[i].y - groups[j].y)
-        > groups[i].radius + groups[j].radius + 6);
-    }
-  }
+test("5,000 locations retain original coordinates after repeated hits", () => {
+  const items = Array.from({ length: 5000 }, (_, i) => item(i * 10, i % 8 + 1));
+  const before = plain(items);
+  assert.equal(screenMarkersAtPoint(items, { x: 100, y: 0 }).length, 3);
+  assert.equal(screenMarkersAtPoint(items, { x: 200, y: 0 }).length, 3);
+  assert.deepEqual(items, before);
 });
 
 function appHarness() {
@@ -98,20 +89,24 @@ function appHarness() {
     },
     createElement() { return new Element(); }
   };
-  const layer = () => ({
+  const layer = (point, options) => ({
+    point, options, handlers: {},
     items: [],
     addTo() { return this; },
     clearLayers() { this.items = []; },
     addLayer(item) { this.items.push(item); },
     bindTooltip() { return this; },
     bindPopup() { return this; },
-    on() { return this; }
+    on(name, callback) { this.handlers[name] = callback; return this; }
   });
   let scale = 1;
   const map = {
     setView() { return this; }, createPane() {}, getPane() { return { style: {} }; },
     on() {}, closePopup() {},
-    latLngToLayerPoint([lat, lng]) { return { x: lng * scale, y: lat * scale }; },
+    latLngToLayerPoint(value) {
+      const [lat, lng] = Array.isArray(value) ? value : [value.lat, value.lng];
+      return { x: lng * scale, y: lat * scale };
+    },
     layerPointToLatLng({ x, y }) { return { lng: x / scale, lat: y / scale }; }
   };
   let popupPoint;
@@ -134,6 +129,11 @@ function appHarness() {
     context, nodes, document,
     selection: () => vm.runInContext("state.stackSelection", context),
     controller: () => vm.runInContext("state.stackController", context),
+    networkLayers: () => vm.runInContext("networkLayer.items", context),
+    setData(data) {
+      context.testData = data;
+      vm.runInContext("state.networkData = testData", context);
+    },
     popupPoint: () => plain(popupPoint),
     setScale(value) { scale = value; }
   };
@@ -149,17 +149,49 @@ const single = (x, id) => ({
 });
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
-test("screen projection groups stacks and singles, retaining their original locations", () => {
+test("every source location stays drawn, regardless of overlap or network count", () => {
   const app = appHarness();
-  const inputs = [stack(0, 7, "a"), stack(20, 8, "b"), single(40, 9)];
-  const grouped = app.context.screenGroupedFeatures(inputs);
-  assert.equal(grouped.length, 1);
-  assert.equal(grouped[0].properties.count, 16);
-  assert.equal(grouped[0].properties.location_count, 3);
-  assert.deepEqual(plain(grouped[0].properties.type_counts), { BLE: 15, WIFI: 1 });
-  assert.deepEqual(plain(grouped[0].locations), inputs);
+  const inputs = [stack(0, 1990, "a"), stack(10, 8, "b"), single(20, 9)];
+  const data = { mode: "points", features: inputs };
+  app.setData(data);
+  assert.equal(app.context.renderNetworks(data), 3);
+  assert.equal(app.networkLayers().length, 3);
+  assert.deepEqual(plain(app.networkLayers()).map(layer => layer.point), [[10, 0], [10, 10], [10, 20]]);
+  assert.ok(app.networkLayers().every(layer => layer.options.radius <= 7));
+  const found = app.context.screenLocationsAtPoint([10, 0]);
+  assert.deepEqual(plain(found), inputs.slice(0, 2));
   app.setScale(8);
-  assert.equal(app.context.screenGroupedFeatures(inputs).length, 3);
+  assert.equal(app.context.renderNetworks(data), 3);
+  assert.deepEqual(plain(app.context.screenLocationsAtPoint([10, 0])), inputs.slice(0, 1));
+});
+
+test("a 500-location route remains 500 dots while its click picker stays local", () => {
+  const app = appHarness();
+  const data = { mode: "points", features: Array.from({ length: 500 }, (_, i) => stack(i * 10, 7, `p${i}`)) };
+  app.setData(data);
+  assert.equal(app.context.renderNetworks(data), 500);
+  assert.equal(app.networkLayers().length, 500);
+  let chosen;
+  app.context.openNetworkStack = feature => { chosen = feature; };
+  app.context.selectLocationsAtPoint({ lat: 10, lng: 100 });
+  assert.equal(chosen.locations.length, 3);
+  assert.equal(chosen.properties.count, 21);
+  assert.deepEqual(plain(chosen.locations).map(feature => feature.geometry.coordinates[0]), [100, 90, 110]);
+});
+
+test("a lone network opens its details while an empty hit does nothing", () => {
+  const app = appHarness();
+  const data = { mode: "points", features: [single(20, 9)] };
+  app.setData(data);
+  let chosen;
+  app.context.selectNetworkFeature = feature => { chosen = feature; };
+  app.context.selectLocationsAtPoint([10, 20]);
+  assert.equal(chosen.properties.id, 9);
+  chosen = null;
+  app.context.selectLocationsAtPoint([10, 200]);
+  assert.equal(chosen, null);
+  app.setData({ mode: "clusters", features: data.features });
+  assert.equal(app.context.screenLocationsAtPoint([10, 20]).length, 0);
 });
 
 test("combined drawer pages across both stacks without duplicate or missing networks", async () => {

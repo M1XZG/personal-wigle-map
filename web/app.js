@@ -376,91 +376,47 @@ function featureIsStack(feature) {
 }
 
 function networkPointRadius(properties) {
+  if (featureIsStack({ properties })) return 7;
   const observations = Math.max(1, Number(pick(properties, ["observations", "observation_count", "count", "samples"], 1)));
   return elements.densityMode.checked
     ? Math.max(6, Math.min(24, 4 + Math.log2(observations + 1) * 2.2))
     : 6;
 }
 
-function screenGroupedFeatures(features) {
+function screenLocationsAtPoint(latlng) {
+  if (state.networkData?.mode !== "points") return [];
+  const features = state.networkData.features || [];
   const items = [];
   for (const feature of features) {
     const point = featurePoint(feature);
     if (!point) continue;
     const pixels = map.latLngToLayerPoint(point);
-    const count = featureIsStack(feature) ? Number(feature.properties.count) : 1;
     items.push({
       x: pixels.x,
       y: pixels.y,
-      count,
-      radius: featureIsStack(feature) ? stackMarkerSize(count) / 2 : networkPointRadius(feature.properties) + 1,
+      radius: networkPointRadius(feature.properties) + 1,
       feature
     });
   }
-  return groupScreenMarkers(items).map(group => {
-    if (group.members.length === 1) return group.members[0].feature;
-    const center = map.layerPointToLatLng(L.point(group.x, group.y));
-    const locations = group.members.map(item => item.feature);
-    const typeCounts = {};
-    for (const feature of locations) {
-      const code = typeCode(feature.properties);
-      const category = ["WIFI", "BLE", "BLUETOOTH"].includes(code) ? code : "CELLULAR";
-      const counts = featureIsStack(feature) ? feature.properties.type_counts : { [category]: 1 };
-      for (const [type, count] of Object.entries(counts)) {
-        typeCounts[type] = (typeCounts[type] || 0) + count;
-      }
-    }
-    return {
-      type: "Feature",
-      geometry: { type: "Point", coordinates: [center.lng, center.lat] },
-      properties: {
-        stack: true,
-        proximity: true,
-        count: group.count,
-        location_count: locations.length,
-        type_counts: typeCounts
-      },
-      locations
-    };
-  });
+  return screenMarkersAtPoint(items, map.latLngToLayerPoint(latlng))
+    .map(item => item.feature);
 }
 
-function stackMarker(feature) {
-  const point = featurePoint(feature);
-  if (!point) return null;
-  const properties = feature.properties || {};
-  const count = Math.max(2, Number(properties.count) || 2);
-  const locationCount = feature.locations?.length || 1;
-  const size = stackMarkerSize(count, locationCount);
-  const title = locationCount > 1
-    ? `${formatNumber(count)} networks across ${formatNumber(locationCount)} locations`
-    : `${formatNumber(count)} networks at this location`;
-  const typeCounts = properties.type_counts || {};
-  const dots = [
-    ["WIFI", TYPE_META.WIFI.color],
-    ["BLE", TYPE_META.BLE.color],
-    ["BLUETOOTH", TYPE_META.BLUETOOTH.color],
-    ["CELLULAR", TYPE_META.LTE.color]
-  ].filter(([type]) => Number(typeCounts[type]) > 0);
-  const icon = L.divIcon({
-    className: "",
-    html: `
-      <div class="stack-icon${locationCount > 1 ? " proximity-icon" : ""}" style="width:${size}px;height:${size}px"
-           aria-label="${escapeHtml(title)}">
-        <span>${escapeHtml(count > 999 ? `${Math.round(count / 100) / 10}k` : count)}</span>
-        ${locationCount > 1 ? `<small>${formatNumber(locationCount)} loc.</small>` : ""}
-        <span class="stack-icon-types">
-          ${dots.map(([, color]) => `<i style="background:${color}"></i>`).join("")}
-        </span>
-      </div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2]
+function selectLocationsAtPoint(latlng) {
+  const locations = screenLocationsAtPoint(latlng);
+  if (!locations.length) return;
+  if (locations.length === 1 && !featureIsStack(locations[0])) {
+    closeStackDrawer();
+    selectNetworkFeature(locations[0]);
+    return;
+  }
+  const count = locations.reduce((sum, feature) =>
+    sum + (featureIsStack(feature) ? feature.properties.count : 1), 0);
+  openNetworkStack({
+    geometry: locations[0].geometry,
+    properties: { count },
+    locations
   });
-  return L.marker(point, {
-    icon,
-    keyboard: true,
-    title
-  }).on("click", () => openNetworkStack(feature));
 }
 
 function closeStackDrawer(restoreFocus = false) {
@@ -847,7 +803,14 @@ function pointMarker(feature) {
   const point = featurePoint(feature);
   if (!point) return null;
   const properties = feature.properties || {};
-  const meta = TYPE_META[typeCode(properties)];
+  const isStack = featureIsStack(feature);
+  const types = isStack
+    ? Object.entries(properties.type_counts).filter(([, count]) => count > 0)
+      .sort((a, b) => b[1] - a[1])
+    : [];
+  const meta = isStack
+    ? (TYPE_META[types[0]?.[0]] || TYPE_META.LTE)
+    : TYPE_META[typeCode(properties)];
   const radius = networkPointRadius(properties);
   const marker = L.circleMarker(point, {
     pane: "networkPane",
@@ -858,27 +821,28 @@ function pointMarker(feature) {
     fillOpacity: elements.densityMode.checked ? 0.42 : 0.82,
     bubblingMouseEvents: false
   });
-  marker.bindPopup(popupHtml(properties), { maxWidth: 290, autoPan: false });
-  marker.on("click", () => selectNetworkFeature(feature, point, false));
+  const tooltip = isStack
+    ? `${formatNumber(properties.count)} networks at this location`
+      + ` (${types.map(([type, count]) =>
+        `${formatNumber(count)} ${TYPE_META[type]?.label || "Cellular"}`).join(", ")})`
+    : networkDisplayName(properties);
+  marker.bindTooltip(escapeHtml(tooltip), { direction: "top" });
+  marker.on("click", event => selectLocationsAtPoint(event.latlng || point));
   return marker;
 }
 
 function renderNetworks(data) {
   networkLayer.clearLayers();
   const features = Array.isArray(data?.features) ? data.features : [];
-  const rendered = data?.mode === "points" ? screenGroupedFeatures(features) : features;
-  rendered.forEach(feature => {
+  features.forEach(feature => {
     const properties = feature.properties || {};
     const isCluster = properties.cluster === true || properties.cluster === 1 || properties.cluster === "true";
-    const isStack = featureIsStack(feature);
     const marker = isCluster
       ? clusterMarker(feature)
-      : isStack
-        ? stackMarker(feature)
-        : pointMarker(feature);
+      : pointMarker(feature);
     if (marker) networkLayer.addLayer(marker);
   });
-  return rendered.length;
+  return features.length;
 }
 
 function routeDevice(feature, index) {
@@ -1214,7 +1178,7 @@ function resetMapSelection() {
 }
 
 map.on("dragstart zoomstart", resetMapSelection);
-map.on("zoomend", () => renderNetworks(state.networkData));
+map.on("click", event => selectLocationsAtPoint(event.latlng));
 map.on("moveend zoomend", () => scheduleMapRefresh());
 elements.stackDrawerClose.addEventListener("click", () => {
   clearSelectedNetwork();
