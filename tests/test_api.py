@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
+import os
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -220,6 +223,99 @@ def test_public_config_defaults_to_no_badge(client: TestClient):
             "on_start": True,
         },
     }
+
+
+@pytest.mark.parametrize("index_url", ["/", "/index.html"])
+def test_web_assets_are_content_versioned(client: TestClient, index_url: str):
+    page = client.get(index_url)
+    assert page.status_code == 200
+    assert page.headers["cache-control"] == "no-cache"
+    for filename in ("styles.css", "app.js"):
+        response = client.get(f"/{filename}")
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-cache"
+        digest = hashlib.sha256(response.content).hexdigest()[:16]
+        versioned_url = f"/{filename}?v={digest}"
+        assert f'"{versioned_url}"' in page.text
+        versioned = client.get(versioned_url)
+        assert versioned.status_code == 200
+        assert versioned.content == response.content
+        assert versioned.headers["cache-control"] == "no-cache"
+        head = client.head(versioned_url)
+        assert head.status_code == 200
+        assert head.content == b""
+        assert head.headers["content-type"] == response.headers["content-type"]
+    assert client.get("/index.html").text == client.get("/").text
+
+
+@pytest.mark.parametrize("filename", ["styles.css", "app.js"])
+def test_asset_update_invalidates_cached_url_with_same_size_and_mtime(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, filename: str
+):
+    from app import main
+
+    web = tmp_path / "web"
+    web.mkdir()
+    web.joinpath("index.html").write_text(
+        '<link rel="stylesheet" href="/styles.css"><script src="/app.js"></script>',
+        encoding="utf-8",
+    )
+    web.joinpath("styles.css").write_text(".old-icon{color:red}", encoding="utf-8")
+    web.joinpath("app.js").write_text("const version='old';", encoding="utf-8")
+    monkeypatch.setenv("WEB_DIR", str(web))
+    monkeypatch.setenv("APP_VERSION", "development")
+    with TestClient(main.create_app()) as web_client:
+        wait_for_job(web_client)
+        old_page = web_client.get("/")
+        pattern = rf'"/{re.escape(filename)}\?v=[a-f0-9]{{16}}"'
+        old_match = re.search(pattern, old_page.text)
+        assert old_match is not None
+        old_url = old_match.group()[1:-1]
+        cached = web_client.get(old_url)
+
+        asset = web / filename
+        stat = asset.stat()
+        asset.write_bytes(asset.read_bytes().replace(b"old", b"new"))
+        os.utime(asset, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        assert asset.stat().st_size == stat.st_size
+        assert asset.stat().st_mtime_ns == stat.st_mtime_ns
+        new_page = web_client.get("/")
+        new_match = re.search(pattern, new_page.text)
+        assert new_match is not None
+        new_url = new_match.group()[1:-1]
+        assert new_url != old_url
+        fresh = web_client.get(new_url)
+        assert fresh.status_code == 200
+        assert b"new" in fresh.content
+        assert b"old" not in fresh.content
+        # Legacy unversioned clients must not reuse stale stat-based validators.
+        revalidated = web_client.get(
+            f"/{filename}",
+            headers={
+                "If-None-Match": cached.headers["etag"],
+                "If-Modified-Since": cached.headers["last-modified"],
+            },
+        )
+        assert revalidated.status_code == 200
+        assert revalidated.content == fresh.content
+        assert revalidated.headers["cache-control"] == "no-cache"
+
+
+def test_missing_web_asset_reports_failure(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from app import main
+
+    web = tmp_path / "web"
+    web.mkdir()
+    web.joinpath("index.html").write_text('<script src="/app.js"></script>')
+    monkeypatch.setenv("WEB_DIR", str(web))
+    with TestClient(main.create_app()) as web_client:
+        wait_for_job(web_client)
+        assert web_client.get("/").status_code == 503
+        assert web_client.get("/index.html").status_code == 503
+        assert web_client.get("/styles.css").status_code == 404
+        assert web_client.get("/app.js").status_code == 404
 
 
 def test_public_config_supports_custom_branding(

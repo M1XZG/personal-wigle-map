@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import logging
 import os
@@ -14,8 +15,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import queries, wigle_sync
@@ -687,11 +688,35 @@ def create_app() -> FastAPI:
     if web_dir.is_dir():
         index = web_dir / "index.html"
 
-        @application.get("/", include_in_schema=False)
-        def index_page() -> FileResponse:
+        @application.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+        @application.api_route(
+            "/index.html", methods=["GET", "HEAD"], include_in_schema=False
+        )
+        def index_page() -> HTMLResponse:
             if not index.is_file():
                 raise HTTPException(404, "index.html is unavailable")
-            return FileResponse(index)
+            content = index.read_text(encoding="utf-8")
+            for filename in ("styles.css", "app.js"):
+                asset = web_dir / filename
+                if not asset.is_file():
+                    raise HTTPException(503, "Web assets are unavailable")
+                digest = hashlib.sha256(asset.read_bytes()).hexdigest()[:16]
+                content = content.replace(
+                    f'"/{filename}"', f'"/{filename}?v={digest}"'
+                )
+            return HTMLResponse(content, headers={"Cache-Control": "no-cache"})
+
+        @application.api_route(
+            "/styles.css", methods=["GET", "HEAD"], include_in_schema=False
+        )
+        @application.api_route(
+            "/app.js", methods=["GET", "HEAD"], include_in_schema=False
+        )
+        def web_asset(request: Request) -> FileResponse:
+            asset = web_dir / request.url.path.rsplit("/", 1)[-1]
+            if not asset.is_file():
+                raise HTTPException(404, "Web asset is unavailable")
+            return FileResponse(asset, headers={"Cache-Control": "no-cache"})
 
         application.mount(
             "/", StaticFiles(directory=web_dir, html=True), name="web"

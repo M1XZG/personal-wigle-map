@@ -210,6 +210,18 @@ those third-party resources from loading even when the local API is healthy.
 The imported survey database remains local, but tile requests reveal the
 requested map coordinates to the tile provider.
 
+### Stack counts appear without their coloured marker
+
+Faint numbers or apparently invisible clickable stacks can occur when an older
+cached stylesheet is used with newer JavaScript. Reload the page once after
+updating; use a hard refresh if upgrading from a build that lacked asset
+versioning. There is no need to rescan or reimport survey data.
+
+The page now uses content-hashed URLs for the local stylesheet and JavaScript,
+independent of the footer's build identifier. The page and local assets require
+cache revalidation, including when opened through `/index.html`. This prevents
+an ordinary update from reusing the old, unstyled marker assets.
+
 ## The WiGLE badge is missing
 
 Confirm both badge settings:
