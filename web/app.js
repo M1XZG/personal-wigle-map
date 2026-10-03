@@ -827,7 +827,13 @@ function pointMarker(feature) {
         `${formatNumber(count)} ${TYPE_META[type]?.label || "Cellular"}`).join(", ")})`
     : networkDisplayName(properties);
   marker.bindTooltip(escapeHtml(tooltip), { direction: "top" });
-  marker.on("click", event => selectLocationsAtPoint(event.latlng || point));
+  marker.on("click", event => {
+    // Leaflet reports a small circle's centre as latlng, not the pointer position.
+    const clicked = event.originalEvent
+      ? map.mouseEventToLatLng(event.originalEvent)
+      : event.latlng || point;
+    selectLocationsAtPoint(clicked);
+  });
   return marker;
 }
 

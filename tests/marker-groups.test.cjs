@@ -103,6 +103,7 @@ function appHarness() {
   const map = {
     setView() { return this; }, createPane() {}, getPane() { return { style: {} }; },
     on() {}, closePopup() {},
+    mouseEventToLatLng(event) { return event.pointer; },
     latLngToLayerPoint(value) {
       const [lat, lng] = Array.isArray(value) ? value : [value.lat, value.lng];
       return { x: lng * scale, y: lat * scale };
@@ -192,6 +193,21 @@ test("a lone network opens its details while an empty hit does nothing", () => {
   assert.equal(chosen, null);
   app.setData({ mode: "clusters", features: data.features });
   assert.equal(app.context.screenLocationsAtPoint([10, 20]).length, 0);
+});
+
+test("small-circle clicks use the actual pointer, not Leaflet's snapped centre", () => {
+  const app = appHarness();
+  const data = { mode: "points", features: [stack(0, 7, "a"), stack(11, 8, "b"), stack(22, 7, "c")] };
+  app.setData(data);
+  app.context.renderNetworks(data);
+  let chosen;
+  app.context.openNetworkStack = feature => { chosen = feature; };
+  app.networkLayers()[1].handlers.click({
+    latlng: [10, 11],
+    originalEvent: { pointer: [10, 5] }
+  });
+  assert.equal(chosen.locations.length, 2);
+  assert.equal(chosen.properties.count, 15);
 });
 
 test("combined drawer pages across both stacks without duplicate or missing networks", async () => {
