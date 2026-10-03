@@ -18,6 +18,7 @@ from pathlib import Path
 BASE_URL = "https://api.wigle.net/api/v2"
 PAGE_SIZE = 100
 SAFE_TRANSID = re.compile(r"^[A-Za-z0-9_-]+$")
+DEVICE_LABELS_FILE = "device-labels.json"
 logger = logging.getLogger(__name__)
 
 
@@ -147,6 +148,33 @@ def write_manifests(transactions: list[dict], state_dir: Path) -> None:
         raise
 
 
+def _device_slug(transaction: dict) -> str:
+    parts = []
+    for field in ("brand", "model"):
+        value = transaction.get(field)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            parts.append(text)
+    if not parts:
+        return "wigle-account"
+    device = re.sub(r"[^a-z0-9]+", "-", "-".join(parts).lower()).strip("-")
+    if not device:
+        return "wigle-account"
+    return f"wigle-{device}"[:64].rstrip("-")
+
+
+def write_device_labels(transactions: list[dict], kml_dir: Path) -> None:
+    labels = {
+        f"{transid}.kml": _device_slug(transaction)
+        for transaction in transactions
+        if SAFE_TRANSID.fullmatch(transid := str(transaction.get("transid", "")))
+    }
+    content = (json.dumps(labels, indent=2, sort_keys=True) + "\n").encode()
+    _atomic_write(kml_dir / DEVICE_LABELS_FILE, content)
+
+
 def download_kml_files(
     transactions: list[dict],
     authorization: str,
@@ -216,5 +244,6 @@ def sync_once(
         authorization,
         import_root / "kml" / "raw",
     )
+    write_device_labels(transactions, import_root / "kml" / "raw")
     write_manifests(transactions, state_dir)
     return {"transactions": len(transactions), **counts}

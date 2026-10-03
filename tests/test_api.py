@@ -27,17 +27,17 @@ def database(tmp_path: Path) -> Path:
             ("/private/archive/phone-export.csv", "a" * 64, "2024-01-02T00:00:00Z"),
         )
         networks = [
-            (1, "WIFI", "AA:00:00:00:00:01", 1704067200, 1706745600, 51.5000, -0.1000, -40, 2, 1, "Coffee Shop"),
-            (2, "WIFI", "AA:00:00:00:00:02", 1735689600, 1738368000, 51.5003, -0.1003, -55, 1, 1, "Library WiFi"),
-            (3, "BLUETOOTH", "AA:00:00:00:00:03", 1740787200, 1740787200, 40.7, -74.0, -70, 1, 1, "Headphones"),
+            (1, "WIFI", "AA:00:00:00:00:01", 1704067200, 1706745600, 51.5000, -0.1000, -40, 2, 1, "Coffee Shop", "[WPA2][ESS]", 2437, "6"),
+            (2, "WIFI", "AA:00:00:00:00:02", 1735689600, 1738368000, 51.5003, -0.1003, -55, 1, 1, "Library WiFi", "[WPA3][ESS]", 5975, "5"),
+            (3, "BLUETOOTH", "AA:00:00:00:00:03", 1740787200, 1740787200, 40.7, -74.0, -70, 1, 1, "Headphones", "", None, ""),
         ]
         db.executemany(
             """
             INSERT INTO networks(
                 id, network_type, identifier, first_seen, last_seen,
                 best_latitude, best_longitude, best_signal,
-                observation_count, source_count, name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                observation_count, source_count, name, encryption, frequency, channel
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             networks,
         )
@@ -56,8 +56,8 @@ def database(tmp_path: Path) -> Path:
                 """
                 INSERT INTO observations(
                     id, observation_hash, network_id, observed_at, latitude,
-                    longitude, source_device, source_file, import_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    longitude, accuracy, source_device, source_file, import_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """,
                 (
                     observation_id,
@@ -66,6 +66,7 @@ def database(tmp_path: Path) -> Path:
                     observed_at,
                     lat,
                     lon,
+                    2.5 if network_id == 2 else 8.0,
                     device,
                     f"/private/{device}.csv",
                 ),
@@ -322,6 +323,10 @@ def test_network_and_route_contracts(client: TestClient):
     assert body["mode"] == "points"
     assert len(body["features"]) == 1
     assert body["features"][0]["properties"]["type"] == "WIFI"
+    assert body["features"][0]["properties"]["channel"] == "5"
+    assert body["features"][0]["properties"]["frequency"] == 5975
+    assert body["features"][0]["properties"]["encryption"] == "[WPA3][ESS]"
+    assert body["features"][0]["properties"]["accuracy"] == 2.5
     assert "identifier" not in body["features"][0]["properties"]
     assert "name" not in body["features"][0]["properties"]
 
