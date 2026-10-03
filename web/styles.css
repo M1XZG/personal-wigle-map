@@ -984,47 +984,6 @@ footer a {
   box-shadow: 0 0 0 8px rgba(219, 39, 119, 0.14), 0 0 0 16px rgba(126, 34, 206, 0.08);
 }
 
-.stack-icon {
-  position: relative;
-  display: grid;
-  place-items: center;
-  border: 3px solid rgba(255, 255, 255, 0.94);
-  border-radius: 50%;
-  color: white;
-  background: #4c1d5f;
-  box-shadow: 0 4px 14px rgba(38, 14, 48, 0.46);
-  font-size: 0.68rem;
-  font-weight: 900;
-}
-
-.stack-icon-types {
-  position: absolute;
-  right: -0.3rem;
-  bottom: -0.2rem;
-  display: flex;
-  gap: 0.08rem;
-  padding: 0.15rem;
-  border-radius: 999px;
-  background: rgba(32, 15, 39, 0.9);
-}
-
-.stack-icon-types i {
-  width: 0.38rem;
-  height: 0.38rem;
-  border-radius: 50%;
-}
-
-.proximity-icon {
-  align-content: center;
-  gap: 0.05rem;
-  border-style: double;
-}
-
-.proximity-icon small {
-  font-size: 0.53rem;
-  font-weight: 600;
-}
-
 .sr-only {
   position: absolute;
   width: 1px;

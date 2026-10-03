@@ -5,13 +5,17 @@ exports. It imports WiGLE SQLite databases, CSV or CSV.GZ exports, KML files
 and timed GPX tracks, deduplicates overlapping observations, and displays
 network density and survey routes through a Leaflet interface.
 
-At high zoom, networks sharing an exact map position are represented by a
-counted stack marker. Nearby markers that overlap on screen are combined into
-a badge showing the total networks and number of locations. Zooming in splits
-them again when there is room. The drawer lists networks across those locations,
-25 at a time, and its location selector lets you inspect one location without
-zooming. Grouping does not change stored coordinates or merge survey tracks.
-Small groups of up to eight networks fan out with lines to their true positions.
+At street-level zoom, every returned network location stays visible as a small
+coloured dot, including locations shared by many networks. Nearby dots are not
+collapsed into large badges. Click a dot or just beside overlapping dots to
+open a local picker: it considers only dots directly near the click, never a
+chain of neighbours along a route. Hover over a shared dot to see its network
+count and type breakdown; its colour represents the most numerous type there.
+
+The drawer lists networks from those locations, 25 at a time, and its location
+selector lets you inspect one location without zooming. Low-zoom overview
+clusters remain unchanged. Small selections of up to eight networks fan out
+with lines to their true positions.
 Selecting a network highlights each distinct location where it was observed
 without drawing a misleading route between those locations.
 
