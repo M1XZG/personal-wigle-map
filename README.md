@@ -106,6 +106,13 @@ missing KML exports into `imports/kml/raw/`, writes sync manifests beneath
 Downloads use temporary files and atomic replacement so a failed request
 cannot leave a partial KML for the importer.
 
+When WiGLE supplies brand or model metadata for a transaction, synchronized
+files receive a stable lowercase device label such as
+`wigle-google-pixel-9-pro`. Existing generic `wigle-account` imports are
+relabelled on the next successful sync and rescan. Files without device
+metadata retain the generic label, and identical physical devices reporting
+the same brand and model remain grouped together.
+
 Set `WIGLE_SYNC_SECONDS=0` or leave both credentials blank to disable automatic
 sync. Non-zero intervals must be at least 300 seconds. Credentials are passed
 to the container as environment variables and can be seen by users with Docker

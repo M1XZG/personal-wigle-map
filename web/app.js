@@ -79,6 +79,10 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
 
 const networkLayer = L.layerGroup().addTo(map);
 const routeLayer = L.layerGroup().addTo(map);
+map.createPane("routePane");
+map.getPane("routePane").style.zIndex = 390;
+map.createPane("networkPane");
+map.getPane("networkPane").style.zIndex = 410;
 
 function pick(object, keys, fallback = null) {
   for (const key of keys) {
@@ -332,6 +336,12 @@ function popupHtml(properties) {
   const last = pick(properties, ["last_seen", "lastseen", "last", "latest"]);
   const observations = pick(properties, ["observations", "observation_count", "count", "samples"]);
   const signal = pick(properties, ["signal", "signal_dbm", "rssi", "best_signal"]);
+  const channel = pick(properties, ["channel"]);
+  const frequencyValue = pick(properties, ["frequency"]);
+  const frequency = frequencyValue === null || frequencyValue === "" ? NaN : Number(frequencyValue);
+  const encryption = pick(properties, ["encryption", "capabilities"]);
+  const accuracyValue = pick(properties, ["accuracy", "accuracy_meters"]);
+  const accuracy = accuracyValue === null || accuracyValue === "" ? NaN : Number(accuracyValue);
   const identifier = pick(properties, ["identifier", "bssid"]);
   const rows = [
     ["First seen", formatDate(first, true)],
@@ -344,6 +354,25 @@ function popupHtml(properties) {
   if (signal !== null && signal !== undefined && signal !== "") {
     const signalText = /^-?\d+(\.\d+)?$/.test(String(signal)) ? `${signal} dBm` : String(signal);
     rows.push(["Signal", signalText]);
+  }
+  const band = frequency >= 2400 && frequency < 2500
+    ? "2.4 GHz"
+    : frequency >= 4900 && frequency < 5925
+      ? "5 GHz"
+      : frequency >= 5925 && frequency <= 7125
+        ? "6 GHz"
+        : "";
+  if (channel !== null && channel !== undefined && channel !== "") {
+    rows.push(["Channel", band ? `${channel} · ${band}` : channel]);
+  }
+  if (Number.isFinite(frequency)) {
+    rows.push(["Frequency", `${frequency} MHz`]);
+  }
+  if (encryption) {
+    rows.push(["Encryption", encryption]);
+  }
+  if (Number.isFinite(accuracy)) {
+    rows.push(["Location accuracy", `${accuracy} m`]);
   }
   return `
     <h3 class="popup-title">${escapeHtml(name)}</h3>
@@ -363,6 +392,7 @@ function pointMarker(feature) {
     ? Math.max(6, Math.min(24, 4 + Math.log2(observations + 1) * 2.2))
     : 6;
   const marker = L.circleMarker(point, {
+    pane: "networkPane",
     radius,
     color: "#ffffff",
     weight: elements.densityMode.checked ? 1 : 1.5,
@@ -431,6 +461,7 @@ function renderRoutes(data) {
     const device = routeDevice(feature, index);
     if (!devices.includes(device)) devices.push(device);
     L.geoJSON(feature, {
+      pane: "routePane",
       style: {
         color: routeColor(device),
         weight: 3.5,

@@ -234,8 +234,17 @@ def networks(
         sql = (
             "SELECT n.id, n.network_type, n.name, n.identifier, "
             "n.first_seen, n.last_seen, "
-            "n.best_latitude, n.best_longitude, n.best_signal, n.observation_count "
-            f"FROM networks n WHERE {where} "
+            "n.best_latitude, n.best_longitude, n.best_signal, n.observation_count, "
+            "n.encryption, n.capabilities, n.frequency, n.channel, "
+            "best.accuracy AS best_accuracy "
+            "FROM networks n "
+            "LEFT JOIN observations best ON best.id = ("
+            "SELECT o.id FROM observations o WHERE o.network_id = n.id "
+            "ORDER BY o.signal IS NULL, o.signal DESC, "
+            "o.accuracy IS NULL, o.accuracy ASC, "
+            "o.observed_at, o.latitude, o.longitude, o.observation_hash LIMIT 1"
+            ") "
+            f"WHERE {where} "
             "ORDER BY n.last_seen DESC LIMIT ?"
         )
         with connect(db_path) as db:
@@ -250,6 +259,10 @@ def networks(
                 "last_seen": _iso_timestamp(row["last_seen"]),
                 "best_signal": row["best_signal"],
                 "observation_count": row["observation_count"],
+                "encryption": row["encryption"] or row["capabilities"] or None,
+                "frequency": row["frequency"],
+                "channel": row["channel"] or None,
+                "accuracy": row["best_accuracy"],
             }
             if include_identifiers:
                 if row["name"]:

@@ -6,6 +6,7 @@ import csv
 import gzip
 import hashlib
 import itertools
+import json
 import logging
 import re
 import sqlite3
@@ -26,6 +27,8 @@ from .storage import (
 SUPPORTED_SUFFIXES = {".sqlite", ".db", ".csv", ".gz", ".kml", ".gpx"}
 DESCRIPTION_FIELD = re.compile(r"^([^:]+):\s*(.*)$")
 DATE_DIRECTORY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+DEVICE_SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+DEVICE_LABELS_FILE = "device-labels.json"
 logger = logging.getLogger(__name__)
 TYPE_MAP = {
     "W": "WIFI",
@@ -162,6 +165,19 @@ def _observation_hash(record: ObservationRecord) -> str:
 
 
 def _infer_device(path: Path, import_root: Path | None = None) -> str:
+    if path.parent.name == "raw" and path.parent.parent.name == "kml":
+        labels_path = path.parent / DEVICE_LABELS_FILE
+        if labels_path.is_file():
+            try:
+                labels = json.loads(labels_path.read_text(encoding="utf-8"))
+                label = labels.get(path.name) if isinstance(labels, dict) else None
+                if isinstance(label, str) and DEVICE_SLUG.fullmatch(label):
+                    return label
+                if label is not None:
+                    logger.warning("Ignoring invalid device label for %s", path.name)
+            except (OSError, json.JSONDecodeError):
+                logger.warning("Could not read WiGLE device labels from %s", labels_path)
+        return "wigle-account"
     parts = path.parts
     if "device-exports" in parts:
         index = parts.index("device-exports")
@@ -303,6 +319,7 @@ def _parse_kml(path: Path) -> Iterator[tuple[ObservationRecord, RouteRecord | No
                     capabilities=fields.get("capabilities", ""),
                     encryption=fields.get("encryption", ""),
                     frequency=_int(fields.get("frequency")),
+                    channel=fields.get("channel", ""),
                 )
                 altitude = _float(coordinate[2]) if len(coordinate) > 2 else None
                 observation = ObservationRecord(
@@ -680,6 +697,82 @@ def _insert_route_candidate(
     return cursor.rowcount
 
 
+def _relabel_import(
+    connection: sqlite3.Connection,
+    import_id: int,
+    device: str,
+) -> bool:
+    existing = connection.execute(
+        "SELECT device_label FROM imports WHERE id = ?",
+        (import_id,),
+    ).fetchone()
+    if existing is None or existing["device_label"] == device:
+        return False
+
+    route_rows = connection.execute(
+        """
+        SELECT observed_at, latitude, longitude, altitude, accuracy, external,
+               explicit_run_id, source_file, genuine_route
+        FROM route_candidates WHERE import_id = ?
+        """,
+        (import_id,),
+    ).fetchall()
+    connection.execute(
+        "DELETE FROM route_candidates WHERE import_id = ?",
+        (import_id,),
+    )
+    connection.execute(
+        "UPDATE imports SET device_label = ? WHERE id = ?",
+        (device, import_id),
+    )
+    connection.execute(
+        "UPDATE observation_sources SET source_device = ? WHERE import_id = ?",
+        (device, import_id),
+    )
+    connection.execute(
+        """
+        UPDATE observations SET
+            source_device = (
+                SELECT os.source_device FROM observation_sources os
+                WHERE os.observation_id = observations.id
+                ORDER BY os.source_device, os.source_file, os.import_id LIMIT 1
+            ),
+            source_file = (
+                SELECT os.source_file FROM observation_sources os
+                WHERE os.observation_id = observations.id
+                ORDER BY os.source_device, os.source_file, os.import_id LIMIT 1
+            ),
+            import_id = (
+                SELECT os.import_id FROM observation_sources os
+                WHERE os.observation_id = observations.id
+                ORDER BY os.source_device, os.source_file, os.import_id LIMIT 1
+            )
+        WHERE id IN (
+            SELECT observation_id FROM observation_sources WHERE import_id = ?
+        )
+        """,
+        (import_id,),
+    )
+    for row in route_rows:
+        _insert_route_candidate(
+            connection,
+            RouteRecord(
+                observed_at=row["observed_at"],
+                latitude=row["latitude"],
+                longitude=row["longitude"],
+                altitude=row["altitude"],
+                accuracy=row["accuracy"],
+                external=row["external"],
+                run_id=row["explicit_run_id"],
+                genuine=row["genuine_route"],
+            ),
+            import_id,
+            row["source_file"],
+            device,
+        )
+    return bool(route_rows)
+
+
 def import_file(
     path: str | Path,
     db_path: str | Path,
@@ -693,6 +786,8 @@ def import_file(
     initialize_database(db_path)
     stat = source.stat()
     source_path = str(source)
+    device = device_hint or _infer_device(source)
+    routes_relabelled = False
     with connect_database(db_path) as connection:
         unchanged = connection.execute(
             """
@@ -703,21 +798,28 @@ def import_file(
             """,
             (source_path, stat.st_size, stat.st_mtime_ns),
         ).fetchone()
+        if unchanged and unchanged["device_label"] != device:
+            routes_relabelled = _relabel_import(
+                connection,
+                unchanged["id"],
+                device,
+            )
     if unchanged:
+        if routes_relabelled and rebuild_routes_after:
+            rebuild_routes(db_path)
         return {
             "path": source_path,
             "status": "skipped",
             "reason": "unchanged_file",
             "sha256": unchanged["sha256"],
-            "device": unchanged["device_label"],
+            "device": device,
             "format": unchanged["format"],
             "networks": 0,
             "observations": 0,
             "route_points": 0,
+            "routes_relabelled": routes_relabelled,
         }
-
     digest = _sha256(source)
-    device = device_hint or _infer_device(source)
     try:
         file_format = _detect_format(source)
     except Exception as error:
@@ -880,7 +982,10 @@ def import_tree(import_root: str | Path, db_path: str | Path) -> dict[str, objec
         )
     route_summary = (
         rebuild_routes(db_path)
-        if any(result["status"] == "complete" for result in results)
+        if any(
+            result["status"] == "complete" or result.get("routes_relabelled")
+            for result in results
+        )
         else {"segments": 0, "route_points": 0}
     )
     return {
