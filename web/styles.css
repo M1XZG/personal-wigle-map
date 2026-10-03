@@ -1013,6 +1013,17 @@ footer a {
   border-radius: 50%;
 }
 
+.proximity-icon {
+  align-content: center;
+  gap: 0.05rem;
+  border-style: double;
+}
+
+.proximity-icon small {
+  font-size: 0.53rem;
+  font-weight: 600;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

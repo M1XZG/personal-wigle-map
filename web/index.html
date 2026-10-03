@@ -185,12 +185,16 @@
     <aside id="stack-drawer" class="stack-drawer" aria-labelledby="stack-drawer-title" hidden>
       <header class="stack-drawer-header">
         <div>
-          <p class="eyebrow">Shared map position</p>
+          <p class="eyebrow">Network selection</p>
           <h2 id="stack-drawer-title">Networks at this location</h2>
         </div>
         <button id="stack-drawer-close" class="icon-button" type="button"
                 aria-label="Close network stack">×</button>
       </header>
+      <label id="stack-location-label" class="field-label" for="stack-location" hidden>
+        Browse locations
+      </label>
+      <select id="stack-location" hidden></select>
       <p id="stack-drawer-status" class="stack-drawer-status" role="status"
          aria-live="polite">Choose a network to inspect.</p>
       <div id="stack-network-list" class="stack-network-list"></div>
@@ -213,6 +217,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="/marker-groups.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

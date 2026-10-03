@@ -26,11 +26,8 @@ const state = {
   mapController: null,
   debounceTimer: null,
   stackController: null,
-  stackId: null,
-  stackPage: 0,
-  stackHasMore: false,
-  stackFeatures: [],
-  stackAnchor: null,
+  stackSelection: null,
+  stackReturnFocus: null,
   selectedNetworkId: null,
   observationRequestNumber: 0
 };
@@ -76,6 +73,8 @@ const elements = {
   stackDrawerTitle: document.querySelector("#stack-drawer-title"),
   stackDrawerStatus: document.querySelector("#stack-drawer-status"),
   stackNetworkList: document.querySelector("#stack-network-list"),
+  stackLocation: document.querySelector("#stack-location"),
+  stackLocationLabel: document.querySelector("#stack-location-label"),
   stackLoadMore: document.querySelector("#stack-load-more"),
   stackDrawerClose: document.querySelector("#stack-drawer-close")
 };
@@ -372,12 +371,70 @@ function networkDisplayName(properties) {
   ));
 }
 
+function featureIsStack(feature) {
+  return [true, 1, "true"].includes(feature.properties?.stack);
+}
+
+function networkPointRadius(properties) {
+  const observations = Math.max(1, Number(pick(properties, ["observations", "observation_count", "count", "samples"], 1)));
+  return elements.densityMode.checked
+    ? Math.max(6, Math.min(24, 4 + Math.log2(observations + 1) * 2.2))
+    : 6;
+}
+
+function screenGroupedFeatures(features) {
+  const items = [];
+  for (const feature of features) {
+    const point = featurePoint(feature);
+    if (!point) continue;
+    const pixels = map.latLngToLayerPoint(point);
+    const count = featureIsStack(feature) ? Number(feature.properties.count) : 1;
+    items.push({
+      x: pixels.x,
+      y: pixels.y,
+      count,
+      radius: featureIsStack(feature) ? stackMarkerSize(count) / 2 : networkPointRadius(feature.properties) + 1,
+      feature
+    });
+  }
+  return groupScreenMarkers(items).map(group => {
+    if (group.members.length === 1) return group.members[0].feature;
+    const center = map.layerPointToLatLng(L.point(group.x, group.y));
+    const locations = group.members.map(item => item.feature);
+    const typeCounts = {};
+    for (const feature of locations) {
+      const code = typeCode(feature.properties);
+      const category = ["WIFI", "BLE", "BLUETOOTH"].includes(code) ? code : "CELLULAR";
+      const counts = featureIsStack(feature) ? feature.properties.type_counts : { [category]: 1 };
+      for (const [type, count] of Object.entries(counts)) {
+        typeCounts[type] = (typeCounts[type] || 0) + count;
+      }
+    }
+    return {
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [center.lng, center.lat] },
+      properties: {
+        stack: true,
+        proximity: true,
+        count: group.count,
+        location_count: locations.length,
+        type_counts: typeCounts
+      },
+      locations
+    };
+  });
+}
+
 function stackMarker(feature) {
   const point = featurePoint(feature);
   if (!point) return null;
   const properties = feature.properties || {};
   const count = Math.max(2, Number(properties.count) || 2);
-  const size = Math.max(38, Math.min(62, 34 + Math.log2(count) * 3));
+  const locationCount = feature.locations?.length || 1;
+  const size = stackMarkerSize(count, locationCount);
+  const title = locationCount > 1
+    ? `${formatNumber(count)} networks across ${formatNumber(locationCount)} locations`
+    : `${formatNumber(count)} networks at this location`;
   const typeCounts = properties.type_counts || {};
   const dots = [
     ["WIFI", TYPE_META.WIFI.color],
@@ -388,9 +445,10 @@ function stackMarker(feature) {
   const icon = L.divIcon({
     className: "",
     html: `
-      <div class="stack-icon" style="width:${size}px;height:${size}px"
-           aria-label="${escapeHtml(count)} networks at this location">
-        ${escapeHtml(count > 999 ? `${Math.round(count / 100) / 10}k` : count)}
+      <div class="stack-icon${locationCount > 1 ? " proximity-icon" : ""}" style="width:${size}px;height:${size}px"
+           aria-label="${escapeHtml(title)}">
+        <span>${escapeHtml(count > 999 ? `${Math.round(count / 100) / 10}k` : count)}</span>
+        ${locationCount > 1 ? `<small>${formatNumber(locationCount)} loc.</small>` : ""}
         <span class="stack-icon-types">
           ${dots.map(([, color]) => `<i style="background:${color}"></i>`).join("")}
         </span>
@@ -401,22 +459,23 @@ function stackMarker(feature) {
   return L.marker(point, {
     icon,
     keyboard: true,
-    title: `${formatNumber(count)} networks at this location`
+    title
   }).on("click", () => openNetworkStack(feature));
 }
 
-function closeStackDrawer() {
+function closeStackDrawer(restoreFocus = false) {
   if (state.stackController) state.stackController.abort();
   state.stackController = null;
-  state.stackId = null;
-  state.stackPage = 0;
-  state.stackHasMore = false;
-  state.stackFeatures = [];
-  state.stackAnchor = null;
+  state.stackSelection = null;
   elements.stackDrawer.hidden = true;
   elements.stackNetworkList.replaceChildren();
   elements.stackLoadMore.hidden = true;
+  elements.stackLocation.replaceChildren();
+  elements.stackLocation.hidden = true;
+  elements.stackLocationLabel.hidden = true;
   spiderLayer.clearLayers();
+  if (restoreFocus && state.stackReturnFocus?.isConnected) state.stackReturnFocus.focus();
+  state.stackReturnFocus = null;
 }
 
 function clearSelectedNetwork() {
@@ -425,7 +484,7 @@ function clearSelectedNetwork() {
   observationLayer.clearLayers();
 }
 
-function stackRow(feature) {
+function stackRow(feature, locationNumber, showLocation) {
   const properties = feature.properties || {};
   const code = typeCode(properties);
   const meta = TYPE_META[code] || TYPE_META.WIFI;
@@ -448,14 +507,14 @@ function stackRow(feature) {
   const signalText = signal === null || signal === undefined
     ? "signal unavailable"
     : `${signal} dBm`;
-  details.textContent = `${meta.label} · ${signalText} · ${formatNumber(properties.observation_count)} observations`;
+  details.textContent = `${showLocation ? `Location ${locationNumber} · ` : ""}${meta.label} · ${signalText} · ${formatNumber(properties.observation_count)} observations`;
 
   button.append(dot, name, details);
   button.addEventListener("click", () => {
     elements.stackNetworkList.querySelectorAll(".stack-network-row").forEach(row => {
       row.classList.toggle("selected", row === button);
     });
-    selectNetworkFeature(feature, state.stackAnchor, true);
+    selectNetworkFeature(feature, featurePoint(feature), true);
   });
   return button;
 }
@@ -474,7 +533,7 @@ function renderSpiderfy(features, anchor) {
     const expanded = map.layerPointToLatLng(expandedPoint);
     const properties = feature.properties || {};
     const meta = TYPE_META[typeCode(properties)] || TYPE_META.WIFI;
-    L.polyline([anchor, expanded], {
+    L.polyline([featurePoint(feature), expanded], {
       pane: "observationPane",
       color: "#6f6076",
       weight: 1.5,
@@ -498,61 +557,144 @@ function renderSpiderfy(features, anchor) {
   });
 }
 
-async function loadStackPage(reset = false) {
-  if (!state.stackId) return;
-  if (state.stackController) state.stackController.abort();
+async function loadStackPage() {
+  const selection = state.stackSelection;
+  if (!selection || state.stackController) return;
   const controller = new AbortController();
   state.stackController = controller;
-  const stackId = state.stackId;
-  const page = reset ? 1 : state.stackPage + 1;
-  const params = selectionFilterParams(true);
-  params.set("page", String(page));
-  params.set("per_page", "25");
+  // Commit cursors only after a complete page, so retrying cannot skip networks.
+  let index = selection.index;
+  let page = selection.page;
+  let buffer = [...selection.buffer];
+  const counts = [...selection.counts];
+  const rows = [];
   elements.stackLoadMore.disabled = true;
+  elements.stackLocation.disabled = true;
   elements.stackDrawerStatus.textContent = "Loading networks…";
   try {
-    const body = await fetchJson(
-      `/api/network-stacks/${encodeURIComponent(stackId)}?${params}`,
-      { signal: controller.signal }
-    );
-    if (controller.signal.aborted || stackId !== state.stackId) return;
-    const features = Array.isArray(body?.features) ? body.features : [];
-    if (reset) {
-      state.stackFeatures = [];
-      elements.stackNetworkList.replaceChildren();
+    while (rows.length < 25 && (buffer.length || index < selection.sources.length)) {
+      if (buffer.length) {
+        rows.push(...buffer.splice(0, 25 - rows.length));
+        continue;
+      }
+      const source = selection.sources[index];
+      if (!featureIsStack(source.feature)) {
+        buffer = [{ feature: source.feature, locationNumber: source.number }];
+        index += 1;
+        continue;
+      }
+      const params = new URLSearchParams(selection.filters);
+      params.set("page", String(page + 1));
+      params.set("per_page", "25");
+      const body = await fetchJson(
+        `/api/network-stacks/${encodeURIComponent(source.feature.properties.stack_id)}?${params}`,
+        { signal: controller.signal }
+      );
+      if (controller.signal.aborted || state.stackSelection !== selection) return;
+      const features = body?.features;
+      if (!Array.isArray(features) || !Number.isInteger(body.total)
+          || (body.has_more && features.length === 0)) {
+        throw new Error("Invalid stack response; refresh the map.");
+      }
+      counts[index] = body.total;
+      buffer = features.map(feature => ({ feature, locationNumber: source.number }));
+      if (body.has_more) {
+        page += 1;
+      } else {
+        index += 1;
+        page = 0;
+      }
     }
-    state.stackFeatures.push(...features);
-    features.forEach(feature => elements.stackNetworkList.append(stackRow(feature)));
-    state.stackPage = Number(body?.page) || page;
-    state.stackHasMore = Boolean(body?.has_more);
-    elements.stackLoadMore.hidden = !state.stackHasMore;
+    if (controller.signal.aborted || state.stackSelection !== selection) return;
+    Object.assign(selection, { index, page, buffer, counts });
+    selection.rows.push(...rows);
+    for (const row of rows) {
+      elements.stackNetworkList.append(stackRow(
+        row.feature, row.locationNumber, selection.locations.length > 1
+      ));
+    }
+    const hasMore = buffer.length > 0 || index < selection.sources.length;
+    elements.stackLoadMore.hidden = !hasMore;
+    elements.stackLoadMore.textContent = "Load more networks";
+    const total = counts.reduce((sum, count) => sum + count, 0);
     elements.stackDrawerStatus.textContent =
-      `Showing ${formatNumber(state.stackFeatures.length)} of ${formatNumber(body?.total)} networks.`;
-    if (reset && Number(body?.total) <= 8) {
-      renderSpiderfy(state.stackFeatures, state.stackAnchor);
+      `Showing ${formatNumber(selection.rows.length)} of ${formatNumber(total)} networks`
+      + (selection.sources.length > 1 ? ` across ${formatNumber(selection.sources.length)} locations.` : ".");
+    if (!hasMore && total <= 8) {
+      const anchor = selection.sources.length === 1
+        ? featurePoint(selection.sources[0].feature)
+        : selection.anchor;
+      renderSpiderfy(selection.rows.map(row => row.feature), anchor);
     }
   } catch (error) {
-    if (error.name === "AbortError") return;
+    if (error.name === "AbortError" || state.stackSelection !== selection) return;
     elements.stackDrawerStatus.textContent =
-      `Stack unavailable: ${errorMessage(error, "Unknown API error")}`;
+      `Networks unavailable: ${errorMessage(error, "Unknown API error")}`;
+    elements.stackLoadMore.textContent = "Retry loading networks";
+    elements.stackLoadMore.hidden = false;
   } finally {
-    if (state.stackController === controller) state.stackController = null;
-    elements.stackLoadMore.disabled = false;
+    if (state.stackController === controller) {
+      state.stackController = null;
+      elements.stackLoadMore.disabled = false;
+      elements.stackLocation.disabled = false;
+    }
   }
+}
+
+function browseStackLocations(locations, anchor, locationIndex = -1) {
+  if (state.stackController) state.stackController.abort();
+  state.stackController = null;
+  clearSelectedNetwork();
+  spiderLayer.clearLayers();
+  map.closePopup();
+  const sources = locations
+    .map((feature, index) => ({ feature, number: index + 1 }))
+    .filter((_, index) => locationIndex < 0 || index === locationIndex);
+  state.stackSelection = {
+    locations,
+    anchor,
+    sources,
+    index: 0,
+    page: 0,
+    buffer: [],
+    rows: [],
+    counts: sources.map(source => featureIsStack(source.feature) ? source.feature.properties.count : 1),
+    filters: selectionFilterParams(true).toString()
+  };
+  elements.stackNetworkList.replaceChildren();
+  elements.stackLoadMore.hidden = true;
+  loadStackPage();
 }
 
 function openNetworkStack(feature) {
   closeStackDrawer();
-  clearSelectedNetwork();
   const properties = feature.properties || {};
-  state.stackId = String(properties.stack_id || "");
-  state.stackAnchor = featurePoint(feature);
-  if (!state.stackId || !state.stackAnchor) return;
-  elements.stackDrawerTitle.textContent =
-    `${formatNumber(properties.count)} networks at this location`;
-  elements.stackDrawerStatus.textContent = "Loading networks…";
+  const locations = feature.locations || [feature];
+  const anchor = featurePoint(feature);
+  if (!anchor) return;
+  state.stackReturnFocus = document.activeElement;
+  elements.stackDrawerTitle.textContent = locations.length > 1
+    ? `${formatNumber(properties.count)} networks · ${formatNumber(locations.length)} locations`
+    : `${formatNumber(properties.count)} networks at this location`;
+  if (locations.length > 1) {
+    const all = document.createElement("option");
+    all.value = "-1";
+    all.textContent = `All ${formatNumber(locations.length)} locations`;
+    elements.stackLocation.append(all);
+    locations.forEach((location, index) => {
+      const option = document.createElement("option");
+      option.value = String(index);
+      const count = featureIsStack(location) ? location.properties.count : 1;
+      option.textContent = `Location ${index + 1} — ${formatNumber(count)} networks`;
+      elements.stackLocation.append(option);
+    });
+    elements.stackLocation.value = "-1";
+    elements.stackLocation.hidden = false;
+    elements.stackLocationLabel.hidden = false;
+  }
   elements.stackDrawer.hidden = false;
-  loadStackPage(true);
+  elements.stackDrawerClose.focus();
+  browseStackLocations(locations, anchor);
 }
 
 function popupHtml(properties) {
@@ -706,10 +848,7 @@ function pointMarker(feature) {
   if (!point) return null;
   const properties = feature.properties || {};
   const meta = TYPE_META[typeCode(properties)];
-  const observations = Math.max(1, Number(pick(properties, ["observations", "observation_count", "count"], 1)));
-  const radius = elements.densityMode.checked
-    ? Math.max(6, Math.min(24, 4 + Math.log2(observations + 1) * 2.2))
-    : 6;
+  const radius = networkPointRadius(properties);
   const marker = L.circleMarker(point, {
     pane: "networkPane",
     radius,
@@ -727,10 +866,11 @@ function pointMarker(feature) {
 function renderNetworks(data) {
   networkLayer.clearLayers();
   const features = Array.isArray(data?.features) ? data.features : [];
-  features.forEach(feature => {
+  const rendered = data?.mode === "points" ? screenGroupedFeatures(features) : features;
+  rendered.forEach(feature => {
     const properties = feature.properties || {};
     const isCluster = properties.cluster === true || properties.cluster === 1 || properties.cluster === "true";
-    const isStack = properties.stack === true || properties.stack === 1 || properties.stack === "true";
+    const isStack = featureIsStack(feature);
     const marker = isCluster
       ? clusterMarker(feature)
       : isStack
@@ -738,7 +878,7 @@ function renderNetworks(data) {
         : pointMarker(feature);
     if (marker) networkLayer.addLayer(marker);
   });
-  return features.length;
+  return rendered.length;
 }
 
 function routeDevice(feature, index) {
@@ -835,6 +975,8 @@ async function refreshMap() {
       showMapState("Choose at least one network type.", "empty");
     } else if (!networkCount && !routeCount) {
       showMapState("No networks match this view and filter.", "empty");
+    } else if (state.networkData.truncated) {
+      showMapState("Some locations are outside this result limit. Zoom in or narrow the filters.", "empty");
     } else {
       hideMapState();
     }
@@ -1072,9 +1214,23 @@ function resetMapSelection() {
 }
 
 map.on("dragstart zoomstart", resetMapSelection);
+map.on("zoomend", () => renderNetworks(state.networkData));
 map.on("moveend zoomend", () => scheduleMapRefresh());
-elements.stackDrawerClose.addEventListener("click", closeStackDrawer);
-elements.stackLoadMore.addEventListener("click", () => loadStackPage(false));
+elements.stackDrawerClose.addEventListener("click", () => {
+  clearSelectedNetwork();
+  map.closePopup();
+  closeStackDrawer(true);
+});
+elements.stackDrawer.addEventListener("keydown", event => {
+  if (event.key === "Escape") elements.stackDrawerClose.click();
+});
+elements.stackLocation.addEventListener("change", () => {
+  const selection = state.stackSelection;
+  if (selection) browseStackLocations(
+    selection.locations, selection.anchor, Number(elements.stackLocation.value)
+  );
+});
+elements.stackLoadMore.addEventListener("click", () => loadStackPage());
 elements.sidebarToggle.addEventListener("click", () => {
   setSidebarCollapsed(!elements.sidebar.classList.contains("collapsed"));
 });
@@ -1109,6 +1265,7 @@ elements.showRoutes.addEventListener("change", () => {
   scheduleMapRefresh(0);
 });
 elements.densityMode.addEventListener("change", () => {
+  resetMapSelection();
   renderNetworks(state.networkData);
 });
 elements.resetFilters.addEventListener("click", resetFilters);
