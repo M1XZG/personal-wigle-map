@@ -191,12 +191,15 @@ def test_health_summary_and_static_ui(client: TestClient):
 
     assert "Personal WiGLE Map" in client.get("/").text
     assert 'id="app-version"' in client.get("/").text
+    assert 'id="stack-drawer"' in client.get("/").text
     app_js = client.get("/app.js")
     assert app_js.headers["content-type"].startswith(
         "text/javascript"
     )
     assert "maxNativeZoom: 19" in app_js.text
     assert "maxZoom: 22" in app_js.text
+    assert "/api/network-stacks/" in app_js.text
+    assert "/observations" in app_js.text
     assert client.get("/styles.css").status_code == 200
 
 
@@ -415,6 +418,113 @@ def test_network_and_route_contracts(client: TestClient):
     assert bluetooth["channel"] is None
     assert bluetooth["encryption"] is None
     assert bluetooth["attributes"] == "Uncategorized;10"
+
+
+def test_network_stack_and_observation_contracts(
+    client: TestClient,
+    database: Path,
+):
+    identifier = "AA:00:00:00:00:04"
+    observed_at = 1704110460
+    latitude, longitude = 51.5, -0.1
+    fingerprint = observation_fingerprint(
+        "BLE", identifier, observed_at, latitude, longitude
+    )
+    with sqlite3.connect(database) as db:
+        db.execute(
+            """
+            INSERT INTO networks(
+                id, network_type, identifier, name, first_seen, last_seen,
+                best_latitude, best_longitude, best_signal, observation_count,
+                source_count, capabilities, frequency
+            ) VALUES (4, 'BLE', ?, 'Sensor', ?, ?, ?, ?, -60, 1, 1,
+                      'Uncategorized;10', 7936)
+            """,
+            (identifier, observed_at, observed_at, latitude, longitude),
+        )
+        db.execute(
+            """
+            INSERT INTO observations(
+                id, observation_hash, network_id, observed_at, latitude,
+                longitude, signal, accuracy, source_device, source_file, import_id
+            ) VALUES (5, ?, 4, ?, ?, ?, -60, 4.0, 'phone', '/private/phone.csv', 1)
+            """,
+            (fingerprint, observed_at, latitude, longitude),
+        )
+        db.execute(
+            """
+            INSERT INTO observation_sources(
+                observation_id, import_id, source_device, source_file
+            ) VALUES (5, 1, 'phone', '/private/phone.csv')
+            """
+        )
+        db.execute(
+            "INSERT INTO network_sources(network_id, import_id) VALUES (4, 1)"
+        )
+
+    response = client.get(
+        "/api/networks?bbox=-1,50,1,52&zoom=16&types=WIFI,BLE"
+    )
+    assert response.status_code == 200
+    stack = next(
+        feature
+        for feature in response.json()["features"]
+        if feature["properties"].get("stack")
+    )
+    assert stack["properties"]["count"] == 2
+    assert stack["properties"]["type_counts"] == {
+        "WIFI": 1,
+        "BLE": 1,
+        "BLUETOOTH": 0,
+        "CELLULAR": 0,
+    }
+    stack_id = stack["properties"]["stack_id"]
+
+    first_page = client.get(
+        f"/api/network-stacks/{stack_id}?page=1&per_page=1"
+        "&types=WIFI,BLE"
+    )
+    assert first_page.status_code == 200
+    assert first_page.json()["total"] == 2
+    assert first_page.json()["has_more"] is True
+    assert len(first_page.json()["features"]) == 1
+
+    second_page = client.get(
+        f"/api/network-stacks/{stack_id}?page=2&per_page=1"
+        "&types=WIFI,BLE"
+    )
+    assert second_page.status_code == 200
+    assert second_page.json()["has_more"] is False
+    assert len(second_page.json()["features"]) == 1
+
+    wifi_only = client.get(
+        f"/api/network-stacks/{stack_id}?types=WIFI"
+    )
+    assert wifi_only.status_code == 200
+    assert wifi_only.json()["total"] == 1
+    assert wifi_only.json()["features"][0]["properties"]["type"] == "WIFI"
+
+    observations = client.get("/api/networks/1/observations")
+    assert observations.status_code == 200
+    body = observations.json()
+    assert body["total_observations"] == 2
+    assert body["returned_observations"] == 2
+    assert body["distinct_locations"] == 1
+    assert body["truncated"] is False
+    assert body["features"][0]["properties"]["observation_count"] == 2
+    assert body["features"][0]["properties"]["devices"] == ["phone", "tablet"]
+
+    phone_observations = client.get(
+        "/api/networks/1/observations?devices=phone"
+    )
+    assert phone_observations.status_code == 200
+    assert phone_observations.json()["total_observations"] == 1
+    assert phone_observations.json()["features"][0]["properties"]["devices"] == [
+        "phone"
+    ]
+
+    assert client.get("/api/network-stacks/not-valid").status_code == 422
+    assert client.get("/api/networks/999999/observations").status_code == 404
 
 
 def test_network_identifiers_can_be_enabled(
