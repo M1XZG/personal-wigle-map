@@ -125,6 +125,14 @@ function escapeHtml(value) {
   })[character]);
 }
 
+function deviceList(properties, key) {
+  const value = properties?.[key];
+  if (Array.isArray(value)) {
+    return value.map(device => String(device).trim()).filter(Boolean);
+  }
+  return value ? [String(value).trim()].filter(Boolean) : [];
+}
+
 function errorMessage(error, fallback) {
   return error instanceof Error && error.message ? error.message : fallback;
 }
@@ -343,11 +351,27 @@ function popupHtml(properties) {
   const accuracyValue = pick(properties, ["accuracy", "accuracy_meters"]);
   const accuracy = accuracyValue === null || accuracyValue === "" ? NaN : Number(accuracyValue);
   const identifier = pick(properties, ["identifier", "bssid"]);
+  const firstSeenDevices = deviceList(properties, "first_seen_devices");
+  const positionDevices = deviceList(properties, "position_devices");
+  const allDevices = deviceList(properties, "devices");
   const rows = [
     ["First seen", formatDate(first, true)],
     ["Last seen", formatDate(last, true)],
     ["Observations", formatNumber(observations)]
   ];
+  if (firstSeenDevices.length) {
+    rows.push(["First discovered by", firstSeenDevices.join(", ")]);
+  }
+  const firstSeenSet = new Set(firstSeenDevices);
+  const distinctPositionDevices = positionDevices.filter(device => !firstSeenSet.has(device));
+  if (distinctPositionDevices.length) {
+    rows.push(["Map position recorded by", distinctPositionDevices.join(", ")]);
+  }
+  const highlightedDevices = new Set([...firstSeenDevices, ...positionDevices]);
+  const additionalDevices = allDevices.filter(device => !highlightedDevices.has(device));
+  if (additionalDevices.length) {
+    rows.push(["Also observed by", additionalDevices.join(", ")]);
+  }
   if (identifier) {
     rows.push([code === "WIFI" ? "BSSID" : "Identifier", identifier]);
   }
