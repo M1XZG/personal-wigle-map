@@ -31,14 +31,22 @@ Docker Compose is the supported deployment method:
 git clone https://github.com/M1XZG/personal-wigle-map.git
 cd personal-wigle-map
 cp .env.example .env
+```
+
+Stop here and edit `.env` before starting the stack. Review the settings and
+save your changes. To access the map from another device, set `BIND_ADDRESS` to
+the host's private LAN address; leave it at `127.0.0.1` for local-only access.
+
+Then continue:
+
+```bash
 mkdir -p imports runtime
 sudo chown -R 10001:10001 imports runtime
 docker compose up -d --build
 ```
 
-Open [http://127.0.0.1:8787](http://127.0.0.1:8787). Change
-`BIND_ADDRESS` in `.env` to the host's private LAN address if another device
-needs access.
+Open [http://127.0.0.1:8787](http://127.0.0.1:8787) on the host, or use the
+address you set in `.env`.
 
 Upload files in the browser with a lowercase device slug, or copy them beneath
 `imports/<device-slug>/<date>/` and choose **Rescan storage**. Repeated scans
