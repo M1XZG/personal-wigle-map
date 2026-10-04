@@ -72,7 +72,6 @@ Docker Compose reads these values from `.env`:
 | `WIGLE_API_TOKEN` | blank | WiGLE API token used for account-history sync |
 | `WIGLE_SYNC_SECONDS` | `86400` | Account sync interval; `0` disables automatic sync |
 | `WIGLE_SYNC_ON_START` | `true` | Run an account sync after the container starts |
-| `WHAT3WORDS_API_KEY` | blank | Enable area search by three-word address |
 | `RESCAN_SECONDS` | `0` | Periodic scan interval; `0` disables it |
 | `MAX_UPLOAD_BYTES` | `4294967296` | Per-file upload limit |
 | `CPUS` | `4.0` | Container CPU limit |
@@ -94,13 +93,8 @@ Use **Find an area** to move the map to a latitude and longitude, such as
 `51.5208, -0.1955`. The map zooms to the surrounding area and loads survey data
 there, if any. Coordinate search works without an API key.
 
-For three-word addresses such as `///filled.count.soap`, set
-`WHAT3WORDS_API_KEY` in your private `.env` and restart the service. The server
-sends the address to the what3words API and returns only its coordinates to the
-browser; the key is not sent to the browser. Searches require an internet
-connection and are subject to your what3words plan's limits. No imported survey
-data is sent to what3words. Area search does not accept street addresses or
-postcodes.
+Area search does not accept street addresses or postcodes and does not send
+searches to an external service.
 
 Network popups say **Unnamed network** while `EXPOSE_NETWORK_IDENTIFIERS` is
 false. To show imported SSIDs and BSSIDs, set this in `.env` and recreate the

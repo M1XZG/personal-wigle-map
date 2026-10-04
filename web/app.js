@@ -43,8 +43,6 @@ const elements = {
   wigleBadgeImage: document.querySelector("#wigle-badge-image"),
   areaSearchForm: document.querySelector("#area-search-form"),
   areaSearchInput: document.querySelector("#area-search-input"),
-  areaSearchButton: document.querySelector("#area-search-button"),
-  areaSearchHelp: document.querySelector("#area-search-help"),
   areaSearchStatus: document.querySelector("#area-search-status"),
   apiAlert: document.querySelector("#api-alert"),
   mapState: document.querySelector("#map-state"),
@@ -191,11 +189,6 @@ async function loadConfig() {
   elements.brandTitle.textContent = title;
   elements.brandEyebrow.textContent = eyebrow;
   elements.appVersion.textContent = `Build: ${version}`;
-  if (!config?.what3words_enabled) {
-    elements.areaSearchHelp.textContent =
-      "Enter latitude, longitude to move the map. what3words needs an API key in the server configuration.";
-  }
-
   if (imageUrl) {
     elements.wigleBadge.href = linkUrl;
     elements.wigleBadgeImage.src = imageUrl;
@@ -990,28 +983,14 @@ function areaCoordinates(input) {
   return { latitude, longitude };
 }
 
-async function searchArea(event) {
+function searchArea(event) {
   event.preventDefault();
   const input = elements.areaSearchInput.value.trim();
   elements.areaSearchStatus.textContent = "";
   elements.areaSearchStatus.className = "inline-status";
-  elements.areaSearchButton.disabled = true;
-  elements.areaSearchInput.disabled = true;
   try {
-    let location = areaCoordinates(input);
-    if (!location) {
-      if (!/^(?:\/\/\/)?[^.\s/]+\.[^.\s/]+\.[^.\s/]+$/.test(input)) {
-        throw new Error("Enter latitude, longitude or three words separated by dots.");
-      }
-      location = await fetchJson("/api/locations/what3words", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ words: input })
-      });
-    }
-    if (!Number.isFinite(location.latitude) || !Number.isFinite(location.longitude)) {
-      throw new Error("The location service returned invalid coordinates.");
-    }
+    const location = areaCoordinates(input);
+    if (!location) throw new Error("Enter latitude, longitude separated by a comma.");
     map.flyTo([location.latitude, location.longitude], 13);
     elements.areaSearchStatus.textContent = "Showing the area around your location.";
     elements.areaSearchStatus.classList.add("success");
@@ -1019,9 +998,6 @@ async function searchArea(event) {
   } catch (error) {
     elements.areaSearchStatus.textContent = errorMessage(error, "Area search failed.");
     elements.areaSearchStatus.classList.add("error");
-  } finally {
-    elements.areaSearchButton.disabled = false;
-    elements.areaSearchInput.disabled = false;
   }
 }
 

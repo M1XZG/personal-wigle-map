@@ -42,13 +42,13 @@
         <section aria-labelledby="area-search-title">
           <h2 id="area-search-title">Find an area</h2>
           <form id="area-search-form">
-            <label class="field-label" for="area-search-input">Coordinates or what3words</label>
+            <label class="field-label" for="area-search-input">Latitude, longitude</label>
             <input id="area-search-input" type="text" required maxlength="100"
                    autocomplete="off" spellcheck="false"
                    aria-describedby="area-search-help"
-                   placeholder="51.5208, -0.1955 or ///filled.count.soap">
+                   placeholder="51.5208, -0.1955">
             <small id="area-search-help" class="field-help">
-              Enter latitude, longitude or a three-word address to move the map.
+              Enter coordinates to move the map to the surrounding area.
             </small>
             <button id="area-search-button" class="primary-button" type="submit">Go to area</button>
             <div id="area-search-status" class="inline-status" role="status" aria-live="polite"></div>
