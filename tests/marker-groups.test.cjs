@@ -142,35 +142,21 @@ function appHarness() {
   };
 }
 
-test("coordinate search moves to the surrounding area without an API request", async () => {
+test("coordinate search moves to the surrounding area without an API request", () => {
   const app = appHarness();
   app.nodes.get("#area-search-input").value = "51.5208, -0.1955";
   app.context.fetchJson = () => { throw new Error("Unexpected API request"); };
-  await app.context.searchArea({ preventDefault() {} });
+  app.context.searchArea({ preventDefault() {} });
   assert.deepEqual(plain(app.flownTo()), { point: [51.5208, -0.1955], zoom: 13 });
   assert.match(app.nodes.get("#area-search-status").textContent, /Showing the area/);
 });
 
-test("what3words search uses the server and moves to the surrounding area", async () => {
+test("bad coordinates and invalid search text do not move the map", () => {
   const app = appHarness();
-  app.nodes.get("#area-search-input").value = "///filled.count.soap";
-  let request;
-  app.context.fetchJson = async (url, options) => {
-    request = { url, options };
-    return { latitude: 51.520847, longitude: -0.195521 };
-  };
-  await app.context.searchArea({ preventDefault() {} });
-  assert.equal(request.url, "/api/locations/what3words");
-  assert.equal(request.options.method, "POST");
-  assert.deepEqual(JSON.parse(request.options.body), { words: "///filled.count.soap" });
-  assert.deepEqual(plain(app.flownTo()), { point: [51.520847, -0.195521], zoom: 13 });
-});
-
-test("bad coordinates and invalid search text do not move the map", async () => {
-  const app = appHarness();
-  for (const input of ["91, 0", "51, -181", "not a location"]) {
+  app.context.fetchJson = () => { throw new Error("Unexpected API request"); };
+  for (const input of ["91, 0", "51, -181", "a.b.c", "not a location"]) {
     app.nodes.get("#area-search-input").value = input;
-    await app.context.searchArea({ preventDefault() {} });
+    app.context.searchArea({ preventDefault() {} });
     assert.equal(app.flownTo(), undefined);
     assert.ok(app.nodes.get("#area-search-status").textContent.length);
   }

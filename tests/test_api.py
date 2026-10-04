@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import io
 import os
 import re
 import sqlite3
 import time
-import urllib.error
 from pathlib import Path
 
 import pytest
@@ -157,7 +155,6 @@ def client(database: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "WEB_DIR", str(Path(__file__).resolve().parents[1] / "web")
     )
     monkeypatch.setenv("RESCAN_SECONDS", "0")
-    monkeypatch.delenv("WHAT3WORDS_API_KEY", raising=False)
     monkeypatch.delenv("APP_VERSION", raising=False)
     import app.importer as importer
     import app.main as main
@@ -199,6 +196,7 @@ def test_health_summary_and_static_ui(client: TestClient):
     assert 'id="app-version"' in client.get("/").text
     assert 'id="stack-drawer"' in client.get("/").text
     assert 'id="area-search-form"' in client.get("/").text
+    assert 'for="area-search-input">Latitude, longitude' in client.get("/").text
     app_js = client.get("/app.js")
     assert app_js.headers["content-type"].startswith(
         "text/javascript"
@@ -226,107 +224,7 @@ def test_public_config_defaults_to_no_badge(client: TestClient):
             "interval_seconds": 86400,
             "on_start": True,
         },
-        "what3words_enabled": False,
     }
-
-
-def test_what3words_search_needs_configuration(client: TestClient):
-    response = client.post("/api/locations/what3words", json={"words": "filled.count.soap"})
-    assert response.status_code == 503
-    assert response.json()["detail"] == "what3words search is not configured"
-
-
-def test_what3words_search_keeps_key_on_server(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-):
-    from app import main
-
-    monkeypatch.setenv("WHAT3WORDS_API_KEY", "test-private-key")
-    requests = []
-
-    def lookup(request, timeout):
-        requests.append((request, timeout))
-        return io.BytesIO(b'{"coordinates":{"lat":51.520847,"lng":-0.195521}}')
-
-    monkeypatch.setattr(main.urllib.request, "urlopen", lookup)
-    configured = TestClient(main.create_app())
-    config = configured.get("/api/config").json()
-    assert config["what3words_enabled"] is True
-    assert "test-private-key" not in str(config)
-    response = configured.post(
-        "/api/locations/what3words", json={"words": "///filled.count.soap"}
-    )
-    assert response.status_code == 200
-    assert response.json() == {"latitude": 51.520847, "longitude": -0.195521}
-    assert len(requests) == 1
-    request, timeout = requests[0]
-    assert "words=filled.count.soap" in request.full_url
-    assert "test-private-key" not in request.full_url
-    assert request.get_header("X-api-key") == "test-private-key"
-    assert timeout == 8
-    assert "test-private-key" not in response.text
-
-
-@pytest.mark.parametrize("words", ["two.words", "a.b.c.d", "a b.c.d", "///a/b.c.d"])
-def test_what3words_search_rejects_bad_input(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch, words: str
-):
-    from app import main
-
-    monkeypatch.setenv("WHAT3WORDS_API_KEY", "test-private-key")
-    monkeypatch.setattr(
-        main.urllib.request, "urlopen",
-        lambda *args, **kwargs: pytest.fail("Invalid input called the provider"),
-    )
-    response = TestClient(main.create_app()).post(
-        "/api/locations/what3words", json={"words": words}
-    )
-    assert response.status_code == 422
-
-
-@pytest.mark.parametrize(
-    ("provider_error", "expected_status", "expected_detail"),
-    [
-        (400, 422, "Three-word address was not found"),
-        (402, 503, "what3words quota exceeded; check your API plan"),
-        (403, 503, "what3words API key was rejected"),
-        (429, 503, "what3words rate limit reached; try again later"),
-    ],
-)
-def test_what3words_search_reports_provider_failure(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch,
-    provider_error: int, expected_status: int, expected_detail: str,
-):
-    from app import main
-
-    monkeypatch.setenv("WHAT3WORDS_API_KEY", "test-private-key")
-
-    def lookup(request, timeout):
-        raise urllib.error.HTTPError(request.full_url, provider_error, "error", {}, None)
-
-    monkeypatch.setattr(main.urllib.request, "urlopen", lookup)
-    response = TestClient(main.create_app()).post(
-        "/api/locations/what3words", json={"words": "filled.count.soap"}
-    )
-    assert response.status_code == expected_status
-    assert response.json()["detail"] == expected_detail
-    assert "test-private-key" not in response.text
-
-
-@pytest.mark.parametrize("payload", [b"not json", b'{"coordinates":{}}', b'{"coordinates":{"lat":999,"lng":0}}'])
-def test_what3words_search_rejects_invalid_provider_response(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch, payload: bytes,
-):
-    from app import main
-
-    monkeypatch.setenv("WHAT3WORDS_API_KEY", "test-private-key")
-    monkeypatch.setattr(
-        main.urllib.request, "urlopen", lambda *args, **kwargs: io.BytesIO(payload)
-    )
-    response = TestClient(main.create_app()).post(
-        "/api/locations/what3words", json={"words": "filled.count.soap"}
-    )
-    assert response.status_code == 502
 
 
 @pytest.mark.parametrize("index_url", ["/", "/index.html"])
@@ -461,7 +359,6 @@ def test_public_config_supports_custom_branding(
                 "interval_seconds": 86400,
                 "on_start": True,
             },
-            "what3words_enabled": False,
         }
 
 
