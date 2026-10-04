@@ -23,6 +23,7 @@ services:
       WIGLE_API_TOKEN: "${WIGLE_API_TOKEN:-}"
       WIGLE_SYNC_SECONDS: "${WIGLE_SYNC_SECONDS:-86400}"
       WIGLE_SYNC_ON_START: "${WIGLE_SYNC_ON_START:-true}"
+      WHAT3WORDS_API_KEY: "${WHAT3WORDS_API_KEY:-}"
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8787}:8000"
     volumes:

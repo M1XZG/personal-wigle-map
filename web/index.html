@@ -39,6 +39,22 @@
       <div id="api-alert" class="alert alert-error" role="alert" hidden></div>
 
       <div class="sidebar-scroll">
+        <section aria-labelledby="area-search-title">
+          <h2 id="area-search-title">Find an area</h2>
+          <form id="area-search-form">
+            <label class="field-label" for="area-search-input">Coordinates or what3words</label>
+            <input id="area-search-input" type="text" required maxlength="100"
+                   autocomplete="off" spellcheck="false"
+                   aria-describedby="area-search-help"
+                   placeholder="51.5208, -0.1955 or ///filled.count.soap">
+            <small id="area-search-help" class="field-help">
+              Enter latitude, longitude or a three-word address to move the map.
+            </small>
+            <button id="area-search-button" class="primary-button" type="submit">Go to area</button>
+            <div id="area-search-status" class="inline-status" role="status" aria-live="polite"></div>
+          </form>
+        </section>
+
         <section aria-labelledby="summary-title">
           <div class="section-heading">
             <h2 id="summary-title">At a glance</h2>

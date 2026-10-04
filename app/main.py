@@ -3,21 +3,26 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+import json
 import logging
+import math
 import os
 import re
 import sqlite3
 import threading
+import urllib.error
+import urllib.request
 import uuid
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from . import queries, wigle_sync
 
@@ -33,6 +38,7 @@ except ImportError:
 ALLOWED_SUFFIXES = (".sqlite", ".db", ".csv", ".csv.gz", ".kml", ".gpx")
 DEVICE_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+THREE_WORDS_RE = re.compile(r"[^.\s/]+\.[^.\s/]+\.[^.\s/]+")
 EXECUTABLE_MAGIC = (
     b"\x7fELF",
     b"MZ",
@@ -42,6 +48,49 @@ EXECUTABLE_MAGIC = (
     b"\xfe\xed\xfa\xcf",
 )
 logger = logging.getLogger(__name__)
+
+
+class What3wordsSearch(BaseModel):
+    words: str = Field(min_length=5, max_length=100)
+
+
+def _what3words_coordinates(words: str, api_key: str) -> dict[str, float]:
+    request = urllib.request.Request(
+        "https://api.what3words.com/v3/convert-to-coordinates?"
+        + urlencode({"words": words}),
+        headers={"X-Api-Key": api_key, "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            result = json.load(response)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 400:
+            raise HTTPException(422, "Three-word address was not found") from exc
+        logger.warning("what3words lookup returned HTTP %s", exc.code)
+        if exc.code == 402:
+            raise HTTPException(503, "what3words quota exceeded; check your API plan") from exc
+        if exc.code in {401, 403}:
+            raise HTTPException(503, "what3words API key was rejected") from exc
+        if exc.code == 429:
+            raise HTTPException(503, "what3words rate limit reached; try again later") from exc
+        raise HTTPException(502, "what3words lookup is unavailable") from exc
+    except (TimeoutError, urllib.error.URLError, OSError) as exc:
+        logger.warning("what3words lookup could not reach the provider")
+        raise HTTPException(502, "what3words lookup is unavailable") from exc
+    except json.JSONDecodeError as exc:
+        logger.warning("what3words returned invalid JSON")
+        raise HTTPException(502, "what3words returned an invalid location") from exc
+    try:
+        latitude = float(result["coordinates"]["lat"])
+        longitude = float(result["coordinates"]["lng"])
+        if not (math.isfinite(latitude) and math.isfinite(longitude)):
+            raise ValueError("Non-finite coordinates")
+        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+            raise ValueError("Coordinates outside valid ranges")
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        logger.warning("what3words returned an invalid coordinate response")
+        raise HTTPException(502, "what3words returned an invalid location") from exc
+    return {"latitude": latitude, "longitude": longitude}
 
 
 def _boolean_env(name: str, default: bool = False) -> bool:
@@ -204,6 +253,7 @@ def create_app() -> FastAPI:
     )
     wigle_api_name = os.getenv("WIGLE_API_NAME", "").strip()
     wigle_api_token = os.getenv("WIGLE_API_TOKEN", "").strip()
+    what3words_api_key = os.getenv("WHAT3WORDS_API_KEY", "").strip()
     wigle_sync_seconds = _positive_int_env(
         "WIGLE_SYNC_SECONDS", 86400, allow_zero=True
     )
@@ -455,7 +505,17 @@ def create_app() -> FastAPI:
                 "interval_seconds": wigle_sync_seconds,
                 "on_start": wigle_sync_on_start,
             },
+            "what3words_enabled": bool(what3words_api_key),
         }
+
+    @application.post("/api/locations/what3words")
+    def search_what3words(search: What3wordsSearch) -> dict[str, float]:
+        if not what3words_api_key:
+            raise HTTPException(503, "what3words search is not configured")
+        words = search.words.strip().removeprefix("///")
+        if not THREE_WORDS_RE.fullmatch(words):
+            raise HTTPException(422, "Enter three words separated by dots")
+        return _what3words_coordinates(words, what3words_api_key)
 
     @application.get("/api/summary")
     def get_summary() -> dict[str, Any]:
