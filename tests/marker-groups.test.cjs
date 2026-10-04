@@ -66,7 +66,7 @@ function appHarness() {
       this.checked = false;
       this.value = "";
       this.selectedOptions = [];
-      this.classList = { toggle() {}, contains() { return false; } };
+      this.classList = { toggle() {}, add() {}, contains() { return false; } };
     }
     append(...children) { this.children.push(...children); }
     replaceChildren(...children) { this.children = children; }
@@ -100,9 +100,10 @@ function appHarness() {
     on(name, callback) { this.handlers[name] = callback; return this; }
   });
   let scale = 1;
+  let flownTo;
   const map = {
     setView() { return this; }, createPane() {}, getPane() { return { style: {} }; },
-    on() {}, closePopup() {},
+    on() {}, closePopup() {}, flyTo(point, zoom) { flownTo = { point, zoom }; },
     mouseEventToLatLng(event) { return event.pointer; },
     latLngToLayerPoint(value) {
       const [lat, lng] = Array.isArray(value) ? value : [value.lat, value.lng];
@@ -114,7 +115,7 @@ function appHarness() {
   const context = vm.createContext({
     document, URLSearchParams, AbortController, console,
     fetch: () => new Promise(() => {}),
-    window: { addEventListener() {} },
+    window: { addEventListener() {}, matchMedia: () => ({ matches: false }) },
     L: {
       map: () => map, tileLayer: layer, layerGroup: layer,
       point: (x, y) => ({ x, y }), polyline: layer, circleMarker: layer,
@@ -136,9 +137,44 @@ function appHarness() {
       vm.runInContext("state.networkData = testData", context);
     },
     popupPoint: () => plain(popupPoint),
+    flownTo: () => flownTo,
     setScale(value) { scale = value; }
   };
 }
+
+test("coordinate search moves to the surrounding area without an API request", async () => {
+  const app = appHarness();
+  app.nodes.get("#area-search-input").value = "51.5208, -0.1955";
+  app.context.fetchJson = () => { throw new Error("Unexpected API request"); };
+  await app.context.searchArea({ preventDefault() {} });
+  assert.deepEqual(plain(app.flownTo()), { point: [51.5208, -0.1955], zoom: 13 });
+  assert.match(app.nodes.get("#area-search-status").textContent, /Showing the area/);
+});
+
+test("what3words search uses the server and moves to the surrounding area", async () => {
+  const app = appHarness();
+  app.nodes.get("#area-search-input").value = "///filled.count.soap";
+  let request;
+  app.context.fetchJson = async (url, options) => {
+    request = { url, options };
+    return { latitude: 51.520847, longitude: -0.195521 };
+  };
+  await app.context.searchArea({ preventDefault() {} });
+  assert.equal(request.url, "/api/locations/what3words");
+  assert.equal(request.options.method, "POST");
+  assert.deepEqual(JSON.parse(request.options.body), { words: "///filled.count.soap" });
+  assert.deepEqual(plain(app.flownTo()), { point: [51.520847, -0.195521], zoom: 13 });
+});
+
+test("bad coordinates and invalid search text do not move the map", async () => {
+  const app = appHarness();
+  for (const input of ["91, 0", "51, -181", "not a location"]) {
+    app.nodes.get("#area-search-input").value = input;
+    await app.context.searchArea({ preventDefault() {} });
+    assert.equal(app.flownTo(), undefined);
+    assert.ok(app.nodes.get("#area-search-status").textContent.length);
+  }
+});
 
 const stack = (x, count, id) => ({
   type: "Feature", geometry: { type: "Point", coordinates: [x, 10] },
