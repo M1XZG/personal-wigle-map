@@ -232,7 +232,7 @@ def test_web_assets_are_content_versioned(client: TestClient, index_url: str):
     page = client.get(index_url)
     assert page.status_code == 200
     assert page.headers["cache-control"] == "no-cache"
-    for filename in ("styles.css", "marker-groups.js", "app.js"):
+    for filename in ("styles.css", "marker-groups.js", "device-slugs.js", "app.js"):
         response = client.get(f"/{filename}")
         assert response.status_code == 200
         assert response.headers["cache-control"] == "no-cache"
@@ -250,7 +250,7 @@ def test_web_assets_are_content_versioned(client: TestClient, index_url: str):
     assert client.get("/index.html").text == client.get("/").text
 
 
-@pytest.mark.parametrize("filename", ["styles.css", "marker-groups.js", "app.js"])
+@pytest.mark.parametrize("filename", ["styles.css", "marker-groups.js", "device-slugs.js", "app.js"])
 def test_asset_update_invalidates_cached_url_with_same_size_and_mtime(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, filename: str
 ):
@@ -260,12 +260,14 @@ def test_asset_update_invalidates_cached_url_with_same_size_and_mtime(
     web.mkdir()
     web.joinpath("index.html").write_text(
         '<link rel="stylesheet" href="/styles.css">'
-        '<script src="/marker-groups.js"></script><script src="/app.js"></script>',
+        '<script src="/marker-groups.js"></script><script src="/device-slugs.js"></script>'
+        '<script src="/app.js"></script>',
         encoding="utf-8",
     )
     web.joinpath("styles.css").write_text(".old-icon{color:red}", encoding="utf-8")
     web.joinpath("app.js").write_text("const version='old';", encoding="utf-8")
     web.joinpath("marker-groups.js").write_text("const group='old';", encoding="utf-8")
+    web.joinpath("device-slugs.js").write_text("const slugs='old';", encoding="utf-8")
     monkeypatch.setenv("WEB_DIR", str(web))
     monkeypatch.setenv("APP_VERSION", "development")
     with TestClient(main.create_app()) as web_client:

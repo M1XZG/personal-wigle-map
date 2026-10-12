@@ -48,7 +48,8 @@ docker compose up -d --build
 Open [http://127.0.0.1:8787](http://127.0.0.1:8787) on the host, or use the
 address you set in `.env`.
 
-Upload files in the browser with a lowercase device slug, or copy them beneath
+Upload files in the browser with a lowercase device slug (focus the field to
+pick an existing slug from the list, or type to filter it), or copy them beneath
 `imports/<device-slug>/<date>/` and choose **Rescan storage**. Repeated scans
 skip unchanged files and do not duplicate observations.
 

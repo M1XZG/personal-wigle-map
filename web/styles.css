@@ -481,6 +481,36 @@ select option {
   padding: 0.3rem;
 }
 
+.combobox {
+  position: relative;
+}
+
+.combobox-list {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  max-height: 12rem;
+  margin: 0.25rem 0 0;
+  padding: 0.25rem;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: var(--panel-soft);
+}
+
+.combobox-list li {
+  padding: 0.4rem 0.55rem;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.combobox-list li:hover,
+.combobox-list li[aria-selected="true"] {
+  background: var(--purple);
+}
+
 .field-help {
   display: block;
   margin: 0.35rem 0 0.8rem;

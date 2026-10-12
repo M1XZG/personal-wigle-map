@@ -156,9 +156,14 @@
           </div>
           <form id="upload-form">
             <label class="field-label" for="upload-device">Device slug</label>
-            <input id="upload-device" name="device" type="text" required
-                   autocomplete="off" placeholder="survey-phone"
-                   pattern="[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?">
+            <div class="combobox">
+              <input id="upload-device" name="device" type="text" required
+                     autocomplete="off" placeholder="survey-phone"
+                     role="combobox" aria-expanded="false" aria-autocomplete="list"
+                     aria-controls="upload-device-list"
+                     pattern="[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?">
+              <ul id="upload-device-list" class="combobox-list" role="listbox" hidden></ul>
+            </div>
 
             <div id="drop-zone" class="drop-zone" tabindex="0" role="button"
                  aria-controls="file-input" aria-describedby="file-help">
@@ -234,6 +239,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="/marker-groups.js"></script>
+  <script src="/device-slugs.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
