@@ -211,7 +211,13 @@ function clearApiAlert() {
   elements.apiAlert.textContent = "";
 }
 
+const MAP_STATE_MIN_VISIBLE_MS = 600;
+let mapStateTimer = null;
+let mapStateShownAt = 0;
+
 function showMapState(message, mode = "loading") {
+  window.clearTimeout(mapStateTimer);
+  if (elements.mapState.hidden) mapStateShownAt = Date.now();
   elements.mapState.hidden = false;
   elements.mapState.className = `map-state ${mode}`;
   elements.mapStateText.textContent = message;
@@ -220,6 +226,13 @@ function showMapState(message, mode = "loading") {
 }
 
 function hideMapState() {
+  window.clearTimeout(mapStateTimer);
+  // Keep the label up long enough to read so fast loads don't flicker.
+  const remaining = MAP_STATE_MIN_VISIBLE_MS - (Date.now() - mapStateShownAt);
+  if (remaining > 0) {
+    mapStateTimer = window.setTimeout(() => { elements.mapState.hidden = true; }, remaining);
+    return;
+  }
   elements.mapState.hidden = true;
 }
 
