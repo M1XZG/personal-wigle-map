@@ -61,6 +61,7 @@ const elements = {
   routeLegend: document.querySelector("#route-legend"),
   uploadForm: document.querySelector("#upload-form"),
   uploadDevice: document.querySelector("#upload-device"),
+  uploadDeviceList: document.querySelector("#upload-device-list"),
   dropZone: document.querySelector("#drop-zone"),
   fileInput: document.querySelector("#file-input"),
   fileList: document.querySelector("#file-list"),
@@ -1273,6 +1274,68 @@ elements.resetFilters.addEventListener("click", resetFilters);
 elements.areaSearchForm.addEventListener("submit", searchArea);
 elements.refreshImports.addEventListener("click", loadImports);
 elements.rescanButton.addEventListener("click", rescan);
+let deviceActive = -1;
+
+function setDeviceActive(index) {
+  deviceActive = index;
+  Array.from(elements.uploadDeviceList.children).forEach((item, i) => {
+    item.setAttribute("aria-selected", String(i === index));
+    if (i === index) item.scrollIntoView({ block: "nearest" });
+  });
+}
+
+function closeDeviceList() {
+  elements.uploadDeviceList.hidden = true;
+  elements.uploadDevice.setAttribute("aria-expanded", "false");
+  deviceActive = -1;
+}
+
+function chooseDevice(slug) {
+  elements.uploadDevice.value = slug;
+  closeDeviceList();
+}
+
+function openDeviceList() {
+  const slugs = filterDeviceSlugs(
+    normalizedDevices(state.summary || {}).map(device => device.value),
+    elements.uploadDevice.value
+  );
+  elements.uploadDeviceList.replaceChildren(...slugs.map(slug => {
+    const item = document.createElement("li");
+    item.setAttribute("role", "option");
+    item.textContent = slug;
+    // mousedown, not click: keeps focus in the input so blur doesn't close the list first.
+    item.addEventListener("mousedown", event => {
+      event.preventDefault();
+      chooseDevice(slug);
+    });
+    return item;
+  }));
+  deviceActive = -1;
+  elements.uploadDeviceList.hidden = !slugs.length;
+  elements.uploadDevice.setAttribute("aria-expanded", String(slugs.length > 0));
+}
+
+elements.uploadDevice.addEventListener("focus", openDeviceList);
+elements.uploadDevice.addEventListener("input", openDeviceList);
+elements.uploadDevice.addEventListener("blur", closeDeviceList);
+elements.uploadDevice.addEventListener("keydown", event => {
+  const count = elements.uploadDeviceList.children.length;
+  if (event.key === "Escape") return closeDeviceList();
+  if (!count) return;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    if (elements.uploadDeviceList.hidden) openDeviceList();
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    setDeviceActive(deviceActive < 0
+      ? (step > 0 ? 0 : count - 1)
+      : (deviceActive + step + count) % count);
+  } else if (event.key === "Enter" && deviceActive >= 0 && !elements.uploadDeviceList.hidden) {
+    event.preventDefault();
+    chooseDevice(elements.uploadDeviceList.children[deviceActive].textContent);
+  }
+});
+
 elements.uploadForm.addEventListener("submit", uploadFiles);
 elements.fileInput.addEventListener("change", event => setSelectedFiles(event.target.files));
 elements.dropZone.addEventListener("click", () => elements.fileInput.click());
